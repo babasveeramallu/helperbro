@@ -15,6 +15,7 @@ parameter, expected results, troubleshooting, rollback boundaries, and handoff.
 |---|---|
 | Deploy telemetry on your three assigned Windows hosts | [Your deployment order](#your-deployment-order) |
 | Understand exactly what the forwarding scripts do | [Detailed Splunk playbook](splunk/PLAYBOOK.md) |
+| Add packet-aware Windows firewalls and opt-in detection decoys | [Windows defense playbook](windows/DEFENSE-PLAYBOOK.md) |
 | Review scoring and recovery precautions | [Safety rules](#safety-rules) |
 | Use general Windows audits and role tools | [Windows](#windows) |
 | Use Linux host-hardening tools | [Linux](#linux) |
@@ -49,6 +50,39 @@ See the [acceptance checklist](splunk/PLAYBOOK.md#10-acceptance-checklist-and-ha
 MSSQL SMB/SOP access, RDP and SQL, AD WinRM, Splunk queries/8089, and ping.
 Keep those functional. The packet also prohibits restricting public services
 to scoring-only source addresses.
+
+### Packet-aware host firewall and optional decoys
+
+The [Windows defense playbook](windows/DEFENSE-PLAYBOOK.md) explains the new
+additive firewall profiles and their independent timed rollback/commit workflow.
+They preserve existing rules and administration rather than applying the older
+generic management-only firewall assumptions.
+
+```powershell
+# Elevated x64 PowerShell; run the matching role on each host.
+.\windows\Set-PacketFirewall.ps1 -Role AD -AuditOnly
+.\windows\Set-PacketFirewall.ps1 -Role MSSQL -AuditOnly
+.\windows\Set-PacketFirewall.ps1 -Role Wkst -AuditOnly
+```
+
+Apply one host at a time after review, then perform external scoring/admin/Splunk
+checks and run the printed commit command **before the default 10-minute
+deadline**. Otherwise the SYSTEM task attempts to restore the pre-change policy.
+Existing broad inbound allows remain: this is not a strict allowlist. AD retains
+the standard dynamic RPC range. Outbound default stays Allow.
+
+Detection-only decoys are **disabled by default** and require explicit approved
+unused ports and organizer approval. They do not replace real Windows services,
+read credentials/payloads, delay scanners or automatically block clients.
+They emit rate-limited Application events forwarded by the existing Splunk profile.
+
+```powershell
+.\windows\Start-WindowsDecoy.ps1 -AuditOnly
+.\windows\Test-PacketDefense.ps1
+```
+
+See the [full procedures and Splunk alert guidance](windows/DEFENSE-PLAYBOOK.md)
+before activating a decoy. No specific decoy port has been approved yet.
 
 ## Safety Rules
 

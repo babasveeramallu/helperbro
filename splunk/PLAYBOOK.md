@@ -5,6 +5,12 @@ Debian receiver scripts. It documents what the code does, not what a generic
 Splunk installation might do. Start from the [main operator guide](../README.md)
 for unrelated host-hardening tools.
 
+After telemetry receipt is verified, use the separate
+[packet-aware firewall and detection-decoy playbook](../windows/DEFENSE-PLAYBOOK.md)
+if applying those defenses. The forwarding scripts themselves still do not
+change host firewall policy. Decoy Application events use the existing
+`wineventlog` input; alert examples and source limits are in that playbook.
+
 ## Contents
 
 1. [Mission, topology and scoring boundaries](#1-mission-topology-and-scoring-boundaries)

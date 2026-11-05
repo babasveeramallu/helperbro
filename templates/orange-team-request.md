@@ -1,14 +1,13 @@
-# Orange Team Clarification Request
+# Orange Team Request
 
 **Request ID:** [OT-YYYYMMDD-##]  
 **From / role:** [name, team role]  
 **To:** [Orange Team contact / channel]  
 **Sent at:** [YYYY-MM-DD HH:MM TZ]  
-**Inject / reference:** [inject ID, ticket, or instruction text]
 
 ## Request
 
-We received the instruction: “[quote only the relevant wording].” Before acting, please clarify the points below so we can meet the request without interrupting scored services, exceeding our authorization, or exposing sensitive data.
+We received the instruction: “[quote only the relevant wording].” 
 
 1. **Intended outcome:** [What result should be delivered, and how will it be accepted?]
 2. **Scope:** [Which hosts, accounts, services, data, and network segments are in scope?]
@@ -22,8 +21,6 @@ We received the instruction: “[quote only the relevant wording].” Before act
 - **Expected outage or access impact:** [duration / none known]
 - **Dependencies and rollback:** [known dependencies, backup, recovery path]
 - **Immediate safe action taken:** [preserved state / paused risky step / notified lead]
-
-We have paused only the action that depends on this clarification. Existing services and authorized access remain unchanged. Please confirm the requested scope and success criteria, or advise the appropriate White Team contact if this is a scoring/rules question.
 
 **Team contact:** [name, role, radio/channel]  
 **Requested response by:** [time and timezone]

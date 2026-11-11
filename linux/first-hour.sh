@@ -38,21 +38,44 @@ while (($#)); do
     esac
     shift
 done
-mkdir -p -- "$report_dir"
+# Walk from a trusted ancestor before creating anything. Reject symlinks and
+# writable parents, including sticky directories: chmod alone cannot secure them.
+report_error() { printf 'Unsafe report storage: %s\n' "$1" >&2; exit 2; }
+[[ "$report_dir" == /* ]] || report_dir="$PWD/$report_dir"
+[[ "$report_dir" != *$'\n'* ]] || report_error 'newlines in directory paths are not supported'
+IFS=/ read -r -a report_parts <<< "$report_dir"
+report_dir=/
+for part in "${report_parts[@]}"; do
+    [[ -n "$part" && "$part" != . ]] || continue
+    [[ "$part" != .. ]] || report_error 'parent traversal (..) is not supported'
+    [[ ! -L "$report_dir" && -d "$report_dir" ]] || report_error "$report_dir is not a real directory"
+    read -r owner mode < <(stat -c '%u %a' -- "$report_dir")
+    (( (owner == 0 || owner == EUID) && (8#$mode & 0022) == 0 )) || report_error "untrusted directory $report_dir"
+    report_dir="${report_dir%/}/$part"
+    if [[ ! -e "$report_dir" && ! -L "$report_dir" ]]; then
+        mkdir -m 700 -- "$report_dir"
+    fi
+done
+[[ ! -L "$report_dir" && -d "$report_dir" ]] || report_error "$report_dir is not a real directory"
+read -r owner mode < <(stat -c '%u %a' -- "$report_dir")
+(( owner == EUID && (8#$mode & 0022) == 0 )) || report_error "untrusted report directory $report_dir"
 chmod 700 -- "$report_dir"
 stamp="$(date +%Y%m%d-%H%M%S)"
 report="$report_dir/linux-first-hour-$stamp.log"
 ledger="$report_dir/password-rotation-ledger.tsv"
 credentials="$report_dir/rotated-credentials-$stamp.txt"
-: > "$report"
-chmod 600 "$report"
+# noclobber rejects existing files (including dangling symlinks); keep the
+# descriptor so subsequent writes never resolve the report pathname again.
+[[ ! -e "$report" && ! -L "$report" ]] || report_error "report already exists: $report"
+(set -C; : > "$report")
+exec {report_fd}>> "$report"
 log() {
     case "$1" in
         CHANGE) changed=$((changed + 1)) ;;
         FLAG) flagged=$((flagged + 1)) ;;
         SKIP) skipped=$((skipped + 1)) ;;
     esac
-    printf '[%s] %-6s %s\n' "$(date '+%F %T%z')" "$1" "$2" | tee -a "$report"
+    printf '[%s] %-6s %s\n' "$(date '+%F %T%z')" "$1" "$2" | tee -a "/dev/fd/$report_fd"
 }
 
 configure_host_firewall() {
@@ -87,14 +110,15 @@ configure_host_firewall() {
     } > "$rules"
     nft -c -f "$rules" || { log ERROR "nft rejected candidate host rules $rules"; return 2; }
     log INFO "Candidate host rules (audit-only unless --apply): $rules"
-    cat "$rules" | tee -a "$report"
+    cat "$rules" | tee -a "/dev/fd/$report_fd"
     [[ "$apply" == true ]] || return 0
     command -v systemd-run >/dev/null 2>&1 && systemctl is-system-running >/dev/null 2>&1 || { log ERROR 'Host firewall apply requires systemd-run for rollback.'; return 2; }
     nft list table inet ccdc_host >/dev/null 2>&1 && { log ERROR 'inet ccdc_host already exists; inspect/remove it explicitly.'; return 2; }
     (( EUID == 0 )) || { log ERROR 'Host firewall apply requires root.'; return 2; }
     [[ -t 0 ]] || { log ERROR 'Host firewall apply requires an interactive terminal.'; return 2; }
     backup="$report_dir/host-firewall-before-$stamp.nft"
-    nft list ruleset > "$backup"
+    [[ ! -e "$backup" && ! -L "$backup" ]] || report_error "backup already exists: $backup"
+    (set -C; nft list ruleset > "$backup")
     printf 'Type APPLY HOST FIREWALL AND KEEP ROLLBACK: '
     IFS= read -r answer
     [[ "$answer" == 'APPLY HOST FIREWALL AND KEEP ROLLBACK' ]] || { log INFO 'Host firewall cancelled.'; return 0; }
@@ -173,32 +197,32 @@ while IFS= read -r -d '' path; do
     details="$(stat -c 'owner=%U group=%G mode=%a' "$path" 2>/dev/null || printf 'stat=unavailable')"
     fingerprints="$(ssh-keygen -lf "$path" 2>/dev/null | tr '\n' ';' || true)"
     log FLAG "$path $details fingerprints=${fingerprints:-unreadable-or-empty}"
-done < <(find / -type d \( -path /proc -o -path /sys -o -path /dev -o -path /run -o -path /mnt -o -path /media \) -prune -o -type f -name authorized_keys -print0 2>>"$report" || true)
+done < <(find / -type d \( -path /proc -o -path /sys -o -path /dev -o -path /run -o -path /mnt -o -path /media \) -prune -o -type f -name authorized_keys -print0 2>&"$report_fd" || true)
 log INFO 'Per-user crontabs:'
 if command -v crontab >/dev/null 2>&1; then
     while IFS=: read -r name _ _ _ _ _ _; do
         entries="$(crontab -u "$name" -l 2>/dev/null || true)"
-        [[ -z "$entries" ]] || { log FLAG "crontab for $name"; printf '%s\n' "$entries" | tee -a "$report"; }
+        [[ -z "$entries" ]] || { log FLAG "crontab for $name"; printf '%s\n' "$entries" | tee -a "/dev/fd/$report_fd"; }
     done < /etc/passwd
 else
     log INFO 'crontab unavailable'
 fi
 if [[ "$init" == systemd ]] && command -v systemctl >/dev/null 2>&1; then
     log INFO 'systemd timers:'
-    systemctl list-timers --all --no-pager 2>&1 | tee -a "$report"
+    systemctl list-timers --all --no-pager 2>&1 | tee -a "/dev/fd/$report_fd"
     log INFO 'Cron entries also present on systemd hosts:'
-    for path in /etc/crontab /etc/cron.d/*; do [[ -f "$path" ]] || continue; log FLAG "Review $path"; sed -n '1,160p' "$path" | tee -a "$report"; done
+    for path in /etc/crontab /etc/cron.d/*; do [[ -f "$path" ]] || continue; log FLAG "Review $path"; sed -n '1,160p' "$path" | tee -a "/dev/fd/$report_fd"; done
 else
     log INFO "non-systemd init ($init); cron.d and SysV init inventory:"
     for path in /etc/crontab /etc/cron.d/* /etc/init.d/*; do
         [[ -f "$path" ]] || continue
         log FLAG "Review $path"
-        case "$path" in /etc/cron.d/*|/etc/crontab) sed -n '1,160p' "$path" | tee -a "$report" ;; esac
+        case "$path" in /etc/cron.d/*|/etc/crontab) sed -n '1,160p' "$path" | tee -a "/dev/fd/$report_fd" ;; esac
     done
 fi
 if command -v testparm >/dev/null 2>&1 && [[ -r /etc/samba/smb.conf ]]; then
     log INFO 'Samba detected; effective configuration follows:'
-    testparm -s /etc/samba/smb.conf 2>&1 | tee -a "$report"
+    testparm -s /etc/samba/smb.conf 2>&1 | tee -a "/dev/fd/$report_fd"
     if [[ "$disable_smbv1" == true && "$apply" != true ]]; then log FLAG 'PLAN ONLY: would set Samba client/server minimum protocol to SMB2_02 after validation and confirmation.'; fi
     if [[ "$disable_smbv1" == true && "$apply" == true ]]; then
         (( EUID == 0 )) || { log ERROR 'Samba change needs root'; exit 2; }
@@ -254,6 +278,16 @@ if [[ "$rotate" == true && "$apply" == true ]]; then
     (( EUID == 0 )) || { log ERROR 'Rotation needs root'; exit 2; }
     command -v openssl >/dev/null 2>&1 || { log ERROR 'openssl is required for secure password generation.'; exit 2; }
     command -v chpasswd >/dev/null 2>&1 || { log ERROR 'chpasswd is unavailable; refusing password rotation.'; exit 2; }
+    # The ledger persists across runs; refuse links, shared files, and files
+    # owned by anyone else before opening it in the now trusted directory.
+    if [[ -e "$ledger" || -L "$ledger" ]]; then
+        [[ -f "$ledger" && ! -L "$ledger" ]] || report_error 'ledger is not a regular file'
+        read -r owner mode links < <(stat -c '%u %a %h' -- "$ledger")
+        (( owner == EUID && links == 1 && (8#$mode & 0077) == 0 )) || report_error 'untrusted rotation ledger'
+    else
+        (set -C; : > "$ledger")
+    fi
+    exec {ledger_fd}>> "$ledger"
     users=()
     for name in "${include[@]}"; do
         account="$(awk -F: -v wanted="$name" '$1 == wanted { print; exit }' /etc/passwd)"
@@ -280,20 +314,19 @@ if [[ "$rotate" == true && "$apply" == true ]]; then
     printf 'Accounts to rotate: %s\nType ROTATE %s LOCAL PASSWORDS: ' "${users[*]:-(none)}" "${#users[@]}"
     IFS= read -r answer
     [[ "$answer" == "ROTATE ${#users[@]} LOCAL PASSWORDS" ]] || { log INFO 'Rotation cancelled'; exit 0; }
-    [[ ! -e "$credentials" ]] || { log ERROR "Credential file already exists: $credentials"; exit 2; }
-    : > "$credentials"
-    chmod 600 "$credentials"
-    touch "$ledger"
-    chmod 600 "$ledger"
+    [[ ! -e "$credentials" && ! -L "$credentials" ]] || report_error "credentials already exist: $credentials"
+    set -C
+    exec {credentials_fd}> "$credentials"
+    set +C
     for name in "${users[@]}"; do
         password="$(openssl rand -base64 36 | tr -d '\n')"
-        printf 'account=%s\tpassword=%s\tstatus=PENDING\n' "$name" "$password" >> "$credentials"
-        printf '%s\t%s\n' "$name" "$stamp" >> "$ledger"
+        printf 'account=%s\tpassword=%s\tstatus=PENDING\n' "$name" "$password" >&"$credentials_fd"
+        printf '%s\t%s\n' "$name" "$stamp" >&"$ledger_fd"
         if printf '%s:%s\n' "$name" "$password" | chpasswd; then
-            printf 'account=%s\tstatus=CHANGED\n' "$name" >> "$credentials"
+            printf 'account=%s\tstatus=CHANGED\n' "$name" >&"$credentials_fd"
             log CHANGE "Rotated $name; protected file=$credentials"
         else
-            printf 'account=%s\tstatus=FAILED; verify manually\n' "$name" >> "$credentials"
+            printf 'account=%s\tstatus=FAILED; verify manually\n' "$name" >&"$credentials_fd"
             log ERROR "Rotation failed for $name"
         fi
         unset password

@@ -39,32 +39,71 @@ def set_login_value(text: str, key: str, value: int) -> str:
     return text.rstrip() + f"\n{replacement}\n"
 
 
+def rewrite_auth(text: str) -> str:
+    """Only rewrite the simple Debian stack or our exact previous output.
+
+    Module arguments must never be used to identify a provider. Validate the
+    entire sequence, including controls, before removing or inserting rules.
+    Includes, continuations and other layouts require manual configuration.
+    """
+    rules = []
+    lines = text.split("\n")
+    for index, line in enumerate(lines):
+        if not line.strip(" \t") or line.lstrip(" \t").startswith("#"):
+            continue
+        match = re.fullmatch(
+            r"[ \t]*auth[ \t]+(\[[^\]\r\n]+\]|[a-z]+)[ \t]+"
+            r"([^ \t\r\n]+)(?:[ \t]+([^\r\n]*))?[ \t]*", line
+        )
+        if not match or "\\" in line:
+            raise RuntimeError("common-auth has unsupported syntax; no files edited")
+        control, module, arguments = match.groups()
+        rules.append((index, " ".join(control.split()), module,
+                      tuple((arguments or "").split())))
+
+    unix = ("[success=1 default=ignore]", "pam_unix.so")
+    deny = ("requisite", "pam_deny.so", ())
+    permit = ("required", "pam_permit.so", ())
+    preauth = ("required", "pam_faillock.so", ("preauth", "silent", "deny=5", "unlock_time=1800"))
+    authfail = ("[default=die]", "pam_faillock.so", ("authfail", "deny=5", "unlock_time=1800"))
+    # Jump only over pam_deny, then run pam_permit and the optional pam_cap.
+    authsucc = ("[success=1 default=ignore]", "pam_faillock.so", ("authsucc", "deny=5", "unlock_time=1800"))
+    legacy_authsucc = ("sufficient", *authsucc[1:])
+    sequence = [(control, module, args) for _, control, module, args in rules]
+    if sequence and sequence[-1][:2] == ("optional", "pam_cap.so"):
+        sequence = sequence[:-1]
+    # pam_unix options are retained verbatim, but its identity/control is exact.
+    normalized = [unix if rule[:2] == unix else rule for rule in sequence]
+    if normalized not in (
+        [unix, deny, permit],
+        [preauth, unix, authfail, authsucc, deny, permit],
+        [preauth, unix, authfail, legacy_authsucc, deny, permit],
+    ):
+        raise RuntimeError("common-auth is not a recognized Debian simple pam_unix stack; no files edited")
+
+    def render(rule: tuple) -> str:
+        return "auth " + " ".join((rule[0], rule[1], *rule[2]))
+
+    for index, control, module, _ in rules:
+        if module == "pam_faillock.so":
+            lines[index] = None
+        elif module == "pam_unix.so":
+            lines[index] = "\n".join((render(preauth), lines[index], render(authfail), render(authsucc)))
+    return "\n".join(line for line in lines if line is not None)
+
+
 def apply(root: Path, backup_dir: Path) -> None:
     paths = [root / relative for relative in FILES]
     for path in paths:
         if not path.is_file() or path.is_symlink():
             raise RuntimeError(f"Unsupported/missing PAM file (symlinks are refused): {path}")
     common_auth, common_account, common_password, login_defs = [p.read_text(encoding="utf-8") for p in paths]
-    auth_unix = re.compile(r"^\s*auth\s+\[success=1\s+default=ignore\]\s+pam_unix\.so.*$", re.M)
-    auth_matches = list(auth_unix.finditer(common_auth))
-    if len(auth_matches) != 1:
-        raise RuntimeError("common-auth is not the recognized Debian simple pam_unix stack; no files edited")
-    extra_auth = [line for line in common_auth.splitlines() if re.match(r"^\s*auth\s+", line) and not any(module in line for module in ("pam_unix.so", "pam_deny.so", "pam_permit.so", "pam_faillock.so", "pam_cap.so"))]
-    if extra_auth:
-        raise RuntimeError("common-auth has additional auth providers; refusing to reorder this PAM stack")
+    common_auth = rewrite_auth(common_auth)
     if not re.search(r"^\s*account\s+.*pam_unix\.so", common_account, re.M):
         raise RuntimeError("common-account has no pam_unix entry; unsupported PAM stack")
     password_unix = re.compile(r"^\s*password\s+([^\n]*pam_unix\.so[^\n]*)$", re.M)
     if len(list(password_unix.finditer(common_password))) != 1:
         raise RuntimeError("common-password must have exactly one pam_unix entry")
-
-    common_auth = re.sub(r"(?m)^\s*auth\s+.*pam_faillock\.so.*\n", "", common_auth)
-    match = auth_unix.search(common_auth)
-    unix_line = match.group(0).replace("success=1", "success=1", 1)
-    common_auth = common_auth[:match.start()] + "auth required pam_faillock.so preauth silent deny=5 unlock_time=1800\n" + unix_line + "\nauth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800\nauth sufficient pam_faillock.so authsucc deny=5 unlock_time=1800\n" + common_auth[match.end():]
-    deny = re.search(r"^\s*auth\s+requisite\s+pam_deny\.so.*$", common_auth, re.M)
-    if not deny:
-        raise RuntimeError("common-auth has no recognized requisite pam_deny entry")
 
     common_account = re.sub(r"(?m)^\s*account\s+.*pam_faillock\.so.*\n", "", common_account)
     unix_account = re.search(r"^\s*account\s+.*pam_unix\.so.*$", common_account, re.M)

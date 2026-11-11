@@ -70,12 +70,17 @@ credentials="$report_dir/rotated-credentials-$stamp.txt"
 (set -C; : > "$report")
 exec {report_fd}>> "$report"
 log() {
+    local LC_ALL=C message="$2"
+    # Keep untrusted filenames and command output within one printable record.
+    if [[ "$message" == *[![:print:]]* ]]; then
+        printf -v message '%q' "$message"
+    fi
     case "$1" in
         CHANGE) changed=$((changed + 1)) ;;
         FLAG) flagged=$((flagged + 1)) ;;
         SKIP) skipped=$((skipped + 1)) ;;
     esac
-    printf '[%s] %-6s %s\n' "$(date '+%F %T%z')" "$1" "$2" | tee -a "/dev/fd/$report_fd"
+    printf '[%s] %-6s %s\n' "$(date '+%F %T%z')" "$1" "$message" | tee -a "/dev/fd/$report_fd"
 }
 
 configure_host_firewall() {

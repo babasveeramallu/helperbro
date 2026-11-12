@@ -98,8 +98,8 @@ configure_host_firewall() {
         [[ "$port" =~ ^[0-9]+$ ]] || continue
         # Name the program behind every listener: a port is not safe just because it is open.
         skip=false
-        for skipped in ${skip_ports[@]+"${skip_ports[@]}"}; do
-            if [[ "$skipped" == "$netid:$port" ]]; then skip=true; fi
+        for skip_entry in ${skip_ports[@]+"${skip_ports[@]}"}; do
+            if [[ "$skip_entry" == "$netid:$port" ]]; then skip=true; fi
         done
         if [[ "$skip" == true ]]; then
             log FLAG "Listener $netid:$port (${owner_process:-program unknown}) stays CLOSED because of --skip-port."
@@ -195,8 +195,10 @@ import ipaddress, sys
 for value in sys.argv[1:]: ipaddress.ip_network(value, strict=False)
 PY
     fi
-    for skipped in ${skip_ports[@]+"${skip_ports[@]}"}; do
-        [[ "$skipped" =~ ^(tcp|udp):[0-9]+$ ]] || { log ERROR "--skip-port takes tcp:PORT or udp:PORT, for example tcp:4444; got: $skipped"; exit 2; }
+    for skip_entry in ${skip_ports[@]+"${skip_ports[@]}"}; do
+        [[ "$skip_entry" =~ ^(tcp|udp):([1-9][0-9]{0,4})$ ]] || { log ERROR "--skip-port takes tcp:PORT or udp:PORT, for example tcp:4444; got: $skip_entry"; exit 2; }
+        skip_port="${BASH_REMATCH[2]}"
+        (( 10#$skip_port <= 65535 )) || { log ERROR "--skip-port port must be between 1 and 65535; got: $skip_entry"; exit 2; }
     done
 fi
 if [[ "$rotate" == true && ( ${#exclude[@]} -lt 2 || "${exclude[0]:-}" == "${exclude[1]:-}" || ${#include[@]} -eq 0 || ( "$apply" == true && ! -t 0 ) ) ]]; then log ERROR 'Rotation plan/apply needs two distinct scoring/break-glass exclusions and at least one --include-account; apply also needs an interactive terminal.'; exit 2; fi

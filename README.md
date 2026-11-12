@@ -225,14 +225,14 @@ Entry point: `linux/first-hour.sh`. Requires Bash. Run from the repository root 
 Audit only:
 
 ```bash
-bash scripts/linux/first-hour.sh
+bash linux/first-hour.sh
 ```
 
 Plan-only examples:
 
 ```bash
-bash scripts/linux/first-hour.sh --set-account-policy
-bash scripts/linux/first-hour.sh --apply-host-firewall --management-cidr 10.20.30.0/24
+bash linux/first-hour.sh --set-account-policy
+bash linux/first-hour.sh --apply-host-firewall --management-cidr 10.20.30.0/24
 ```
 
 Useful options:
@@ -250,8 +250,8 @@ Useful options:
 Apply examples (use only after validating the plan and values):
 
 ```bash
-sudo bash scripts/linux/first-hour.sh --apply --set-account-policy
-sudo bash scripts/linux/first-hour.sh --apply --apply-host-firewall --management-cidr 10.20.30.0/24
+sudo bash linux/first-hour.sh --apply --set-account-policy
+sudo bash linux/first-hour.sh --apply --apply-host-firewall --management-cidr 10.20.30.0/24
 ```
 
 The host-firewall mode discovers listener ports and creates rules to allow them from every source. The plan prints one line per listener with the program that owns it. Read that list before applying: a backdoor that is already listening would be opened like any real service unless you name it with `--skip-port`. SSH port 22 is limited to the management CIDRs unless you pass `--public-ssh`. Do not assume the discovered listeners are safe or that the CIDR is correct. Confirm scoring and management connectivity before keeping the firewall rules.
@@ -269,14 +269,14 @@ What the config keys mean:
 - `scoring_sources` from older configs is ignored.
 
 ```bash
-sudo bash scripts/linux/apply-firewall.sh --help
-sudo bash scripts/linux/apply-firewall.sh --config scripts/linux/firewall.example.json
+sudo bash linux/apply-firewall.sh --help
+sudo bash linux/apply-firewall.sh --config linux/firewall.example.json
 ```
 
 The second command validates the config, generates nftables rules under `/run`, and checks syntax; it does not apply rules. Apply only after editing and reviewing the config:
 
 ```bash
-sudo bash scripts/linux/apply-firewall.sh --apply --config scripts/linux/firewall.example.json
+sudo bash linux/apply-firewall.sh --apply --config linux/firewall.example.json
 ```
 
 Apply requires root, `nft`, Python 3, a running systemd manager, and an interactive terminal. The script arms the configured rollback timer before applying. It defaults to drop for inbound and outbound traffic, so incomplete allowlists can break services or access. Keep the rollback armed until scoring and administration are verified. To keep the rules after verification, the script prints the exact systemd timer/service command; to roll back immediately, it prints the nft delete command.
@@ -304,7 +304,7 @@ duplicate collection.
 1. From the repository root, run:
 
 ```bash
-python scripts/splunk/generate-configs.py
+python splunk/generate-configs.py
 ```
 
 1. Review the generated files: `outputs.conf`, `windows-inputs.conf`, `linux-inputs.conf`, `indexes.conf`, and `first-hour-searches.md`.
@@ -551,7 +551,7 @@ delivery. The older broader test runner is not present in every checkout; do not
 assume an external `tests/` tree was included. Practice on matching noncompetition
 VMs before applying to scored systems.
 
-For Linux, first run `bash -n scripts/linux/first-hour.sh scripts/linux/apply-firewall.sh`, then use an isolated VM matching the target distribution for audit/plan tests. PAM policy is distribution-specific, and nftables apply should only be exercised with console access and rollback verified.
+For Linux, first run `bash -n linux/first-hour.sh linux/apply-firewall.sh`, then use an isolated VM matching the target distribution for audit/plan tests. PAM policy is distribution-specific, and nftables apply should only be exercised with console access and rollback verified.
 
 After changes, inspect the report directory specified for the run. Reports may contain sensitive account, host, service, task, or configuration information; restrict access and handle them as sensitive operational data.
 

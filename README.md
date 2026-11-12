@@ -51,6 +51,19 @@ MSSQL SMB/SOP access, RDP and SQL, AD WinRM, Splunk queries/8089, and ping.
 Keep those functional. The packet also prohibits restricting public services
 to scoring-only source addresses.
 
+### Scoring ports to keep reachable
+
+| Host/service | Scoring traffic |
+|---|---|
+| AD | TCP 5985 (WinRM; TCP 5986 only if HTTPS WinRM is configured) |
+| MSSQL | TCP 445 (SMB/SOP), TCP 1433 (SQL), TCP 3389 (RDP) |
+| Splunk | TCP 8089 (queries/management) |
+| Scored hosts | ICMP echo (ping; not a port) |
+
+TCP 9997 is for Splunk forwarder ingestion, not a scoring check. Confirm the
+live scoring sheet and listener configuration; allowing a port does not start
+the service or guarantee that it passes scoring.
+
 ### Packet-aware host firewall and optional decoys
 
 The [Windows defense playbook](windows/DEFENSE-PLAYBOOK.md) explains the new

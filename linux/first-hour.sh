@@ -108,7 +108,9 @@ configure_host_firewall() {
         log INFO "Listener $netid:$port (${owner_process:-program unknown}) would be opened."
         ports+=("$netid:$port")
     done <<< "$listeners"
-    mapfile -t ports < <(printf '%s\n' "${ports[@]}" | sort -u)
+    if ((${#ports[@]})); then
+        mapfile -t ports < <(printf '%s\n' "${ports[@]}" | sort -u)
+    fi
     log INFO "Detected host listeners: ${ports[*]:-(none)}"
     rules="/run/ccdc-host-$stamp.nft"
     {

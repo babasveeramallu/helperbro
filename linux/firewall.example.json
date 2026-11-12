@@ -1,0 +1,16 @@
+{
+  "admin_sources": ["REPLACE_ADMIN_CIDR"],
+  "inbound_services": [
+    { "protocol": "tcp", "port": 80 },
+    { "protocol": "tcp", "port": 443 }
+  ],
+  "admin_services": [
+    { "protocol": "tcp", "port": 22 }
+  ],
+  "outbound_allow": [
+    { "protocol": "udp", "port": 53, "destination": "REPLACE_DNS_SERVER" },
+    { "protocol": "tcp", "port": 53, "destination": "REPLACE_DNS_SERVER" }
+  ],
+  "verification_targets": [],
+  "rollback_seconds": 180
+}

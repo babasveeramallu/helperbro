@@ -2,15 +2,16 @@
 set -Eeuo pipefail
 umask 077
 APPLY=false
-CONFIG="$(dirname "$0")/../../config/firewall.example.json"
-while (($#)); do case "$1" in --apply) APPLY=true ;; --config) (($# > 1)) || exit 2; CONFIG="$2"; shift ;; --help|-h) printf '%s\n' 'Audit by default. Apply with --apply --config FILE only after replacing every placeholder and confirming scoring/admin ranges.'; exit 0 ;; *) echo "Unknown option: $1" >&2; exit 2 ;; esac; shift; done
+CONFIG="$(dirname "$0")/firewall.example.json"
+while (($#)); do case "$1" in --apply) APPLY=true ;; --config) (($# > 1)) || exit 2; CONFIG="$2"; shift ;; --help|-h) printf '%s\n' 'Audit by default. Apply with --apply --config FILE only after replacing every placeholder. inbound_services are opened to every source and ping stays on; admin_services are opened only to admin_sources.'; exit 0 ;; *) echo "Unknown option: $1" >&2; exit 2 ;; esac; shift; done
 [[ $EUID -eq 0 ]] || { echo 'Run as root.' >&2; exit 2; }
 command -v nft >/dev/null && command -v python3 >/dev/null || { echo 'nft and python3 are required.' >&2; exit 2; }
 [[ -r "$CONFIG" ]] || { echo "Cannot read config: $CONFIG" >&2; exit 2; }
 python3 - "$CONFIG" <<'PY'
 import ipaddress, json, sys
 with open(sys.argv[1], encoding="utf-8") as f: cfg = json.load(f)
-for section in ("scoring_sources", "admin_sources"):
+if cfg.get("scoring_sources"): print("Note: scoring_sources is no longer used. inbound_services are opened to every source.")
+for section in ("admin_sources",):
     if not cfg.get(section): raise SystemExit(f"{section} must not be empty")
     for value in cfg[section]:
         if "REPLACE_" in value: raise SystemExit(f"Unfilled placeholder in {section}: {value}")
@@ -32,12 +33,10 @@ PY
 python3 - "$CONFIG" /run/ccdc-first-hour.nft <<'PY'
 import ipaddress, json, sys
 cfg = json.load(open(sys.argv[1], encoding="utf-8"))
-out = ["table inet ccdc_first_hour {", " chain input { type filter hook input priority -10; policy drop;", "  iifname lo accept", "  ct state established,related accept", "  meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept"]
-for source in cfg["scoring_sources"]:
-    net = ipaddress.ip_network(source, strict=False)
-    fam = "ip" if net.version == 4 else "ip6"
-    for rule in cfg["inbound_services"]:
-        out.append(f"  {fam} saddr {net} {rule['protocol']} dport {int(rule['port'])} accept")
+out = ["table inet ccdc_first_hour {", " chain input { type filter hook input priority -10; policy drop;", "  iifname lo accept", "  ct state established,related accept", "  icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept", "  meta l4proto ipv6-icmp icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept"]
+# Public (scored) services answer every source: limiting them to the scoring addresses is not allowed.
+for rule in cfg["inbound_services"]:
+    out.append(f"  {rule['protocol']} dport {int(rule['port'])} accept")
 for source in cfg["admin_sources"]:
     net = ipaddress.ip_network(source, strict=False)
     fam = "ip" if net.version == 4 else "ip6"
@@ -62,11 +61,11 @@ if nft list table inet ccdc_first_hour >/dev/null 2>&1; then echo 'The CCDC fire
 rollback_unit="ccdc-firewall-rollback-$(date +%s)"
 rollback_seconds="$(python3 -c 'import json,sys;print(int(json.load(open(sys.argv[1]))["rollback_seconds"]))' "$CONFIG")"
 NFT_PATH="$(command -v nft)"
-printf 'Validated scoring/admin sources and ports loaded from %s\nType APPLY FIREWALL AND KEEP ROLLBACK to continue: ' "$CONFIG"
+printf 'Validated admin sources and ports loaded from %s\nType APPLY FIREWALL AND KEEP ROLLBACK to continue: ' "$CONFIG"
 IFS= read -r answer
 if [[ "$answer" != 'APPLY FIREWALL AND KEEP ROLLBACK' ]]; then echo 'Cancelled; rules unchanged.'; exit 0; fi
 systemd-run --quiet --unit="$rollback_unit" --on-active="${rollback_seconds}s" "$NFT_PATH" delete table inet ccdc_first_hour || { echo 'Could not arm rollback timer; refusing to apply.' >&2; exit 2; }
 nft -f "$RULES"
-echo "Applied. Automatic rollback is armed for ${rollback_seconds}s (${rollback_unit}.timer). Verify scored services and management access now."
+echo "Applied. Automatic rollback is armed for ${rollback_seconds}s (${rollback_unit}.timer). Verify ping, scored services and management access now."
 echo "To keep rules after successful verification: systemctl stop ${rollback_unit}.timer ${rollback_unit}.service"
 echo 'To roll back immediately: nft delete table inet ccdc_first_hour'

@@ -226,7 +226,7 @@ Useful options:
 
 - `--apply`: execute requested changes. Must run as root. Destructive/lockout-sensitive actions require interactive typed confirmation.
 - `--set-account-policy`: plans or applies Debian/Ubuntu PAM password quality, history, faillock, and login.defs settings. Apply requires `pam_pwquality`, `pam_faillock`, a recognized Debian PAM layout, root, and an interactive terminal; it backs up files and verifies changes. Fedora/RHEL/Oracle Linux PAM changes are intentionally refused by this path.
-- `--apply-host-firewall --management-cidr CIDR`: audit or apply a host nftables firewall. Repeat `--management-cidr` for multiple ranges. Requires `ss`, `nft`, Python 3, and for apply: root, systemd, `systemd-run`, an interactive terminal, and a successful nft syntax check. A rollback timer is armed before applying.
+- `--apply-host-firewall` with `--management-cidr CIDR` or `--public-ssh`: audit or apply a host nftables firewall. Ping (IPv4 and IPv6) stays allowed. With `--management-cidr` (repeat for multiple ranges), SSH port 22 answers only those ranges; use this only when SSH is not a scored service on the host. With `--public-ssh`, SSH answers every source; use this when SSH is scored. Add `--skip-port tcp:PORT` or `udp:PORT` (repeatable) for any listener you do not recognize, so it stays closed. Requires `ss`, `nft`, Python 3, and for apply: root, systemd, `systemd-run`, an interactive terminal, and a successful nft syntax check. A rollback timer is armed before applying.
 - `--disable-smbv1`: if Samba is installed, requires `crudini` and `testparm`, and asks for typed confirmation before changing Samba settings.
 - `--kill-persistence --remove-unit UNIT --remove-cron-file /etc/cron.d/FILE`: targets only explicitly named systemd units and regular non-symlink files under `/etc/cron.d`. Repeat target options as needed. Apply disables/masks units or removes the named cron files after confirmation.
 - `--rotate-passwords --include-account NAME --exclude-account NAME --exclude-account NAME`: rotate selected eligible local interactive accounts. At least one include and two distinct exclusions are required. Apply requires root, an interactive terminal, `openssl`, and `chpasswd`; it asks for typed confirmation and writes a protected credential file.
@@ -241,21 +241,29 @@ sudo bash scripts/linux/first-hour.sh --apply --set-account-policy
 sudo bash scripts/linux/first-hour.sh --apply --apply-host-firewall --management-cidr 10.20.30.0/24
 ```
 
-The host-firewall mode discovers listener ports and creates rules to allow them; it scopes SSH port 22 to the management CIDRs. Do not assume the discovered listeners are safe or that the CIDR is correct. Confirm scoring and management connectivity before keeping the firewall rules.
+The host-firewall mode discovers listener ports and creates rules to allow them from every source. The plan prints one line per listener with the program that owns it. Read that list before applying: a backdoor that is already listening would be opened like any real service unless you name it with `--skip-port`. SSH port 22 is limited to the management CIDRs unless you pass `--public-ssh`. Do not assume the discovered listeners are safe or that the CIDR is correct. Confirm scoring and management connectivity before keeping the firewall rules.
 
 ### Standalone Linux firewall script
 
-Entry point: `linux/apply-firewall.sh`. It uses `config/firewall.example.json` by default. Replace every `REPLACE_` placeholder and validate scoring/admin ranges and service ports before applying.
+Entry point: `linux/apply-firewall.sh`. It uses `linux/firewall.example.json` by default. Replace every `REPLACE_` placeholder and validate the admin ranges and service ports before applying.
+
+What the config keys mean:
+
+- `inbound_services`: the public (scored) services. They are opened to **every** source, because limiting a scored service to the scoring addresses is prohibited (see the scoring guardrails in the Splunk section). If SSH is scored on the host, list port 22 here.
+- `admin_services` and `admin_sources`: ports only your team uses, opened only to your own ranges. Do not list a scored service here.
+- `outbound_allow`: what the host itself may connect out to (for example its DNS server). Everything else outbound is refused.
+- Ping (IPv4 and IPv6) is always allowed.
+- `scoring_sources` from older configs is ignored.
 
 ```bash
 sudo bash scripts/linux/apply-firewall.sh --help
-sudo bash scripts/linux/apply-firewall.sh --config config/firewall.example.json
+sudo bash scripts/linux/apply-firewall.sh --config scripts/linux/firewall.example.json
 ```
 
 The second command validates the config, generates nftables rules under `/run`, and checks syntax; it does not apply rules. Apply only after editing and reviewing the config:
 
 ```bash
-sudo bash scripts/linux/apply-firewall.sh --apply --config config/firewall.example.json
+sudo bash scripts/linux/apply-firewall.sh --apply --config scripts/linux/firewall.example.json
 ```
 
 Apply requires root, `nft`, Python 3, a running systemd manager, and an interactive terminal. The script arms the configured rollback timer before applying. It defaults to drop for inbound and outbound traffic, so incomplete allowlists can break services or access. Keep the rollback armed until scoring and administration are verified. To keep the rules after verification, the script prints the exact systemd timer/service command; to roll back immediately, it prints the nft delete command.

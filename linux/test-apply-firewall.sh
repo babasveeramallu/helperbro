@@ -45,11 +45,23 @@ grep -Fxq '  ip saddr 10.0.0.2 ip daddr 203.0.113.9 tcp sport 80 tcp dport 50002
 grep -Fxq '  ip6 saddr 2001:db8:100::10 ip6 daddr 2001:db8:1::2 tcp sport 22 tcp dport 50003 ct state new tcp flags & (syn | ack) == ack accept' "$RULES"
 grep -Fxq '  ip6 saddr fe80::10 ip6 daddr fe80::20 oifname "enp0s8" tcp sport 22 tcp dport 50005 ct state new tcp flags & (syn | ack) == ack accept' "$RULES"
 grep -Fxq '  ip6 saddr fe80::10 ip6 daddr fe80::21 oif 2 tcp sport 22 tcp dport 50006 ct state new tcp flags & (syn | ack) == ack accept' "$RULES"
-! grep -qE '192\.0\.3\.8|tcp sport 53' "$RULES"
+if grep -qE '192\.0\.3\.8|tcp sport 53' "$RULES"; then
+    echo 'Unauthorized peer or UDP-only service received a TCP exception.' >&2
+    exit 1
+else
+    status=$?
+    (( status == 1 )) || exit "$status"
+fi
 
 : >"$SS_OUTPUT"
 generate_rules
-! grep -q 'ct state new tcp flags' "$RULES"
+if grep -q 'ct state new tcp flags' "$RULES"; then
+    echo 'Empty socket snapshot retained TCP exceptions.' >&2
+    exit 1
+else
+    status=$?
+    (( status == 1 )) || exit "$status"
+fi
 printf '%s\n' 'malformed socket data' >"$SS_OUTPUT"
 if generate_rules 2>/dev/null; then
     echo 'Malformed ss output was accepted.' >&2

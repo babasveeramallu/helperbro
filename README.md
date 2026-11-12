@@ -551,7 +551,7 @@ delivery. The older broader test runner is not present in every checkout; do not
 assume an external `tests/` tree was included. Practice on matching noncompetition
 VMs before applying to scored systems.
 
-For Linux, run `bash -n linux/first-hour.sh linux/apply-firewall.sh` and both `bash linux/test-first-hour-firewall.sh` and `bash linux/test-apply-firewall.sh`, then use an isolated VM matching the target distribution for audit/plan tests. The firewall regression tests mock socket discovery and do not apply rules or verify connectivity. PAM policy is distribution-specific, and nftables apply should only be exercised with console access and rollback verified.
+For Linux, run `bash -n linux/first-hour.sh` and `bash -n linux/apply-firewall.sh`, and both `bash linux/test-first-hour-firewall.sh` and `bash linux/test-apply-firewall.sh`, then use an isolated VM matching the target distribution for audit/plan tests. The firewall regression tests mock socket discovery and do not apply rules or verify connectivity. PAM policy is distribution-specific, and nftables apply should only be exercised with console access and rollback verified.
 
 After changes, inspect the report directory specified for the run. Reports may contain sensitive account, host, service, task, or configuration information; restrict access and handle them as sensitive operational data.
 

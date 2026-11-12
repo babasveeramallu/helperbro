@@ -37,9 +37,21 @@ run_plan() {
 }
 
 run_plan none
-! grep -q ' dport ' "$TEST_RULES"
+if grep -q ' dport ' "$TEST_RULES"; then
+    echo 'No listeners should produce no port rules.' >&2
+    exit 1
+else
+    status=$?
+    (( status == 1 )) || exit "$status"
+fi
 run_plan present tcp:4444
-! grep -q ' dport ' "$TEST_RULES"
+if grep -q ' dport ' "$TEST_RULES"; then
+    echo 'A skipped listener should produce no port rule.' >&2
+    exit 1
+else
+    status=$?
+    (( status == 1 )) || exit "$status"
+fi
 run_plan present udp:4444
 grep -q '^  tcp dport 4444 accept$' "$TEST_RULES"
 

@@ -230,6 +230,11 @@ bash linux/first-hour.sh
 
 Plan-only examples:
 
+The `10.20.30.0/24` management CIDR below is illustrative, not from the team
+packet. Replace it with the actual management source range confirmed in the live
+NETLAB/portal before running. The packet's team-specific public subnet depends
+on the assigned team number.
+
 ```bash
 bash linux/first-hour.sh --set-account-policy
 bash linux/first-hour.sh --apply-host-firewall --management-cidr 10.20.30.0/24

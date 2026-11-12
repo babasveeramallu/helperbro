@@ -32,8 +32,11 @@ $plan = @(Get-PacketFirewallPlan -Role $Role -ListeningTcp $listeners.LocalPort 
     -AdditionalTcpPorts $AdditionalTcpPorts -AdditionalUdpPorts $AdditionalUdpPorts `
     -Indexer $Indexer -IndexerPort $IndexerPort)
 $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop)
-$blocks = @(Get-NetFirewallRule -PolicyStore ActiveStore -Enabled True -Action Block -ErrorAction Stop)
-$allows = @(Get-NetFirewallRule -PolicyStore ActiveStore -Enabled True -Direction Inbound -Action Allow -ErrorAction Stop)
+$activeRules = @(Get-NetFirewallRule -PolicyStore ActiveStore -ErrorAction Stop)
+$blocks = @($activeRules | Where-Object { "$($_.Enabled)" -eq 'True' -and "$($_.Action)" -eq 'Block' })
+$allows = @($activeRules | Where-Object {
+    "$($_.Enabled)" -eq 'True' -and "$($_.Direction)" -eq 'Inbound' -and "$($_.Action)" -eq 'Allow'
+})
 $exposure = foreach ($rule in $allows) {
     $pf = $rule | Get-NetFirewallPortFilter -ErrorAction Stop
     $af = $rule | Get-NetFirewallAddressFilter -ErrorAction Stop

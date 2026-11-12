@@ -85,12 +85,16 @@ function Get-NetFirewallProfile {
 }
 function Get-NetFirewallRule {
     param($PolicyStore,$Name,$Enabled,$Action,$Direction,$ErrorAction)
-    foreach ($r in @($global:DefenseFixture.Rules.Values)) {
+    $matched = @(foreach ($r in @($global:DefenseFixture.Rules.Values)) {
         if ($Name -and $r.Name -ne $Name) { continue }
         if ($Action -and $r.Action -ne $Action) { continue }
         if ($Direction -and $r.Direction -ne $Direction) { continue }
         $r
+    })
+    if ($Action -and -not $matched.Count -and $ErrorAction -eq 'Stop') {
+        throw 'No matching MSFT_NetFirewallRule objects found'
     }
+    $matched
 }
 function Get-NetFirewallPortFilter {
     [CmdletBinding()]param([Parameter(ValueFromPipeline)]$Rule)
@@ -175,6 +179,7 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'No-port decoy audit schedules nothing'
     $report = & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -AuditOnly
     Assert-Defense ($report.ExistingInboundAllows.Count -eq 1) 'Audit exposes existing allows'
+    Assert-Defense ($report.ExistingExplicitBlocks.Count -eq 0) 'Audit accepts no active block rules'
     Assert-Defense (-not (Test-Path "$fixture\runs")) 'Audit creates no reports/tasks'
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Audit no scheduled changes'
     & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -WhatIf
@@ -229,8 +234,13 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
     & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Watchdog action remains usable after failed confirmation'
 
-    $block=[pscustomobject]@{Name='Existing-Block';DisplayName='site block';Group='site';Action='Block';Direction='Inbound'}
+    $block=[pscustomobject]@{Name='Existing-Block';DisplayName='site block';Group='site';Enabled=$false;Action='Block';Direction='Inbound'}
     $global:DefenseFixture.Rules[$block.Name]=$block
+    $report = & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -AuditOnly
+    Assert-Defense ($report.ExistingExplicitBlocks.Count -eq 0) 'Audit ignores disabled block rules'
+    $block.Enabled=$true
+    $report = & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -AuditOnly
+    Assert-Defense ($report.ExistingExplicitBlocks.Count -eq 1) 'Audit reports active block rules'
     $before=@(Get-ChildItem "$fixture\runs" -Directory).Count
     $rejected=$false
     try { & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force }

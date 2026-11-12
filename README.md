@@ -279,7 +279,7 @@ The second command validates the config, generates nftables rules under `/run`, 
 sudo bash linux/apply-firewall.sh --apply --config linux/firewall.example.json
 ```
 
-Apply requires root, `nft`, Python 3, a running systemd manager, and an interactive terminal. The script arms the configured rollback timer before applying. It defaults to drop for inbound and outbound traffic, so incomplete allowlists can break services or access. Keep the rollback armed until scoring and administration are verified. To keep the rules after verification, the script prints the exact systemd timer/service command; to roll back immediately, it prints the nft delete command.
+Apply requires root, `nft`, `ss`, Python 3, a running systemd manager, and an interactive terminal. Just before applying, the script snapshots established TCP connections to authorized inbound services and permits their exact address/port tuples to send non-SYN ACK packets if conntrack initially sees them as new. These exceptions do not permit outbound SYNs and remain until the firewall table is removed. Connections created after the snapshot might still be interrupted. The script arms the configured rollback timer before applying. It defaults to drop for inbound and outbound traffic, so incomplete allowlists can break services or access. Keep the rollback armed until scoring and administration are verified. To keep the rules after verification, the script prints the exact systemd timer/service command; to roll back immediately, it prints the nft delete command.
 
 ### PAM helper
 
@@ -551,7 +551,7 @@ delivery. The older broader test runner is not present in every checkout; do not
 assume an external `tests/` tree was included. Practice on matching noncompetition
 VMs before applying to scored systems.
 
-For Linux, run `bash -n linux/first-hour.sh linux/apply-firewall.sh` and `bash linux/test-first-hour-firewall.sh`, then use an isolated VM matching the target distribution for audit/plan tests. The firewall regression test mocks listener discovery and nftables; it does not apply rules or verify connectivity. PAM policy is distribution-specific, and nftables apply should only be exercised with console access and rollback verified.
+For Linux, run `bash -n linux/first-hour.sh linux/apply-firewall.sh` and both `bash linux/test-first-hour-firewall.sh` and `bash linux/test-apply-firewall.sh`, then use an isolated VM matching the target distribution for audit/plan tests. The firewall regression tests mock socket discovery and do not apply rules or verify connectivity. PAM policy is distribution-specific, and nftables apply should only be exercised with console access and rollback verified.
 
 After changes, inspect the report directory specified for the run. Reports may contain sensitive account, host, service, task, or configuration information; restrict access and handle them as sensitive operational data.
 

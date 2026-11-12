@@ -114,7 +114,11 @@ configure_host_firewall() {
     log INFO "Detected host listeners: ${ports[*]:-(none)}"
     rules="/run/ccdc-host-$stamp.nft"
     {
-        printf '%s\n' 'table inet ccdc_host {' ' chain input { type filter hook input priority -20; policy drop;' '  iifname lo accept' '  ct state established,related accept' '  icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept' '  meta l4proto ipv6-icmp icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept'
+        printf '%s\n' 'table inet ccdc_host {' ' chain input { type filter hook input priority -20; policy drop;' '  iifname lo accept'
+        for skip_entry in ${skip_ports[@]+"${skip_ports[@]}"}; do
+            printf '  %s dport %s drop\n' "${skip_entry%%:*}" "${skip_entry#*:}"
+        done
+        printf '%s\n' '  ct state established,related accept' '  icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept' '  meta l4proto ipv6-icmp icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept'
         for entry in "${ports[@]}"; do
             proto="${entry%%:*}"
             port="${entry#*:}"

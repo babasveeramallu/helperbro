@@ -45,15 +45,23 @@ else
     (( status == 1 )) || exit "$status"
 fi
 run_plan present tcp:4444
-if grep -q ' dport ' "$TEST_RULES"; then
-    echo 'A skipped listener should produce no port rule.' >&2
+if ! grep -Fxq '  tcp dport 4444 drop' "$TEST_RULES"; then
+    echo 'A skipped TCP listener should have an explicit drop rule.' >&2
     exit 1
-else
-    status=$?
-    (( status == 1 )) || exit "$status"
+fi
+skip_line="$(grep -nFx '  tcp dport 4444 drop' "$TEST_RULES" | cut -d: -f1)"
+established_line="$(grep -nFx '  ct state established,related accept' "$TEST_RULES" | cut -d: -f1)"
+if (( skip_line >= established_line )); then
+    echo 'Skipped-port drops must precede the established-connection accept.' >&2
+    exit 1
+fi
+if grep -Fxq '  tcp dport 4444 accept' "$TEST_RULES"; then
+    echo 'A skipped TCP listener must not have an accept rule.' >&2
+    exit 1
 fi
 run_plan present udp:4444
 grep -q '^  tcp dport 4444 accept$' "$TEST_RULES"
+grep -Fxq '  udp dport 4444 drop' "$TEST_RULES"
 
 validate() (
     host_firewall=true

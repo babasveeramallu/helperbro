@@ -10,6 +10,8 @@ kill_persistence=false
 set_account_policy=false
 host_firewall=false
 management_cidr=()
+public_ssh=false
+skip_ports=()
 exclude=()
 include=()
 changed=0
@@ -28,12 +30,14 @@ while (($#)); do
         --set-account-policy) set_account_policy=true ;;
         --apply-host-firewall) host_firewall=true ;;
         --management-cidr) (($# > 1)) || exit 2; management_cidr+=("$2"); shift ;;
+        --public-ssh) public_ssh=true ;;
+        --skip-port) (($# > 1)) || exit 2; skip_ports+=("$2"); shift ;;
         --include-account) (($# > 1)) || exit 2; include+=("$2"); shift ;;
         --exclude-account) (($# > 1)) || exit 2; exclude+=("$2"); shift ;;
         --remove-unit) (($# > 1)) || exit 2; remove_units+=("$2"); shift ;;
         --remove-cron-file) (($# > 1)) || exit 2; remove_cron_files+=("$2"); shift ;;
         --report-dir) (($# > 1)) || exit 2; report_dir="$2"; shift ;;
-        --help|-h) printf '%s\n' 'Audit only by default. Categories: --set-account-policy, --apply-host-firewall --management-cidr CIDR (repeat), --rotate-passwords --include-account NAME --exclude-account NAME (repeat), --disable-smbv1, --kill-persistence --remove-unit NAME --remove-cron-file FILE. All changes require --apply.'; exit 0 ;;
+        --help|-h) printf '%s\n' 'Audit only by default. Categories: --set-account-policy, --apply-host-firewall with --management-cidr CIDR (repeat; SSH only from these ranges) or --public-ssh (SSH from anywhere, for a scored SSH service), plus --skip-port tcp:PORT or udp:PORT (repeat; leave a listener you do not trust closed), --rotate-passwords --include-account NAME --exclude-account NAME (repeat), --disable-smbv1, --kill-persistence --remove-unit NAME --remove-cron-file FILE. All changes require --apply.'; exit 0 ;;
         *) printf 'Unknown option: %s\n' "$1" >&2; exit 2 ;;
     esac
     shift
@@ -88,21 +92,37 @@ configure_host_firewall() {
     command -v nft >/dev/null 2>&1 || { log ERROR 'nft is unavailable; host firewall was not changed.'; return 2; }
     listeners="$(ss -H -lntunp 2>&1)" || { log ERROR "Could not enumerate listeners: $listeners"; return 2; }
     ports=()
-    while read -r netid _ _ _ local_addr _; do
+    while read -r netid _ _ _ local_addr _ owner_process; do
         [[ "$netid" == tcp || "$netid" == udp ]] || continue
         port="${local_addr##*:}"
         [[ "$port" =~ ^[0-9]+$ ]] || continue
+        # Name the program behind every listener: a port is not safe just because it is open.
+        skip=false
+        for skip_entry in ${skip_ports[@]+"${skip_ports[@]}"}; do
+            if [[ "$skip_entry" == "$netid:$port" ]]; then skip=true; fi
+        done
+        if [[ "$skip" == true ]]; then
+            log FLAG "Listener $netid:$port (${owner_process:-program unknown}) stays CLOSED because of --skip-port."
+            continue
+        fi
+        log INFO "Listener $netid:$port (${owner_process:-program unknown}) would be opened."
         ports+=("$netid:$port")
     done <<< "$listeners"
-    mapfile -t ports < <(printf '%s\n' "${ports[@]}" | sort -u)
+    if ((${#ports[@]})); then
+        mapfile -t ports < <(printf '%s\n' "${ports[@]}" | sort -u)
+    fi
     log INFO "Detected host listeners: ${ports[*]:-(none)}"
     rules="/run/ccdc-host-$stamp.nft"
     {
-        printf '%s\n' 'table inet ccdc_host {' ' chain input { type filter hook input priority -20; policy drop;' '  iifname lo accept' '  ct state established,related accept' '  meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept'
+        printf '%s\n' 'table inet ccdc_host {' ' chain input { type filter hook input priority -20; policy drop;' '  iifname lo accept'
+        for skip_entry in ${skip_ports[@]+"${skip_ports[@]}"}; do
+            printf '  %s dport %s drop\n' "${skip_entry%%:*}" "${skip_entry#*:}"
+        done
+        printf '%s\n' '  ct state established,related accept' '  icmp type { echo-request, destination-unreachable, time-exceeded, parameter-problem } accept' '  meta l4proto ipv6-icmp icmpv6 type { echo-request, destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept'
         for entry in "${ports[@]}"; do
             proto="${entry%%:*}"
             port="${entry#*:}"
-            if [[ "$port" == 22 && "$proto" == tcp ]]; then
+            if [[ "$port" == 22 && "$proto" == tcp && "$public_ssh" != true ]]; then
                 for cidr in "${management_cidr[@]}"; do
                     family="$(python3 -c 'import ipaddress,sys;print("ip" if ipaddress.ip_network(sys.argv[1],strict=False).version == 4 else "ip6")' "$cidr")"
                     printf '  %s saddr %s tcp dport 22 accept\n' "$family" "$cidr"
@@ -131,7 +151,7 @@ configure_host_firewall() {
     systemd-run --quiet --unit="$unit" --on-active=180s "$(command -v nft)" delete table inet ccdc_host || { log ERROR 'Could not arm rollback; no rules applied.'; return 2; }
     nft -f "$rules"
     log CHANGE "Applied host firewall; rollback=$unit.timer backup=$backup"
-    log INFO 'Verify scored services and SSH from the management CIDR before cancelling rollback.'
+    log INFO 'Verify ping, every scored service and your own SSH access from another machine before cancelling rollback.'
 }
 
 configure_account_policy() {
@@ -171,12 +191,21 @@ trap fail ERR
 if [[ "$apply" == true ]] && (( EUID != 0 )); then log ERROR 'Apply mode requires root.'; exit 2; fi
 if (( EUID != 0 )); then log FLAG 'Audit is unprivileged; some user crontabs, keys, and system paths may be inaccessible.'; fi
 if [[ "$host_firewall" == true ]]; then
-    ((${#management_cidr[@]} > 0)) || { log ERROR '--apply-host-firewall requires one or more --management-cidr values.'; exit 2; }
-    command -v python3 >/dev/null 2>&1 || { log ERROR 'python3 is required to validate management CIDRs.'; exit 2; }
-    python3 - "${management_cidr[@]}" <<'PY'
+    if [[ "$public_ssh" == true ]]; then
+        ((${#management_cidr[@]} == 0)) || { log ERROR 'Use --public-ssh or --management-cidr, not both: they give opposite answers for SSH.'; exit 2; }
+    else
+        ((${#management_cidr[@]} > 0)) || { log ERROR '--apply-host-firewall needs --management-cidr CIDR (SSH only from that range) or --public-ssh (SSH from anywhere, for a scored SSH service).'; exit 2; }
+        command -v python3 >/dev/null 2>&1 || { log ERROR 'python3 is required to validate management CIDRs.'; exit 2; }
+        python3 - "${management_cidr[@]}" <<'PY'
 import ipaddress, sys
 for value in sys.argv[1:]: ipaddress.ip_network(value, strict=False)
 PY
+    fi
+    for skip_entry in ${skip_ports[@]+"${skip_ports[@]}"}; do
+        [[ "$skip_entry" =~ ^(tcp|udp):([1-9][0-9]{0,4})$ ]] || { log ERROR "--skip-port takes tcp:PORT or udp:PORT, for example tcp:4444; got: $skip_entry"; exit 2; }
+        skip_port="${BASH_REMATCH[2]}"
+        (( 10#$skip_port <= 65535 )) || { log ERROR "--skip-port port must be between 1 and 65535; got: $skip_entry"; exit 2; }
+    done
 fi
 if [[ "$rotate" == true && ( ${#exclude[@]} -lt 2 || "${exclude[0]:-}" == "${exclude[1]:-}" || ${#include[@]} -eq 0 || ( "$apply" == true && ! -t 0 ) ) ]]; then log ERROR 'Rotation plan/apply needs two distinct scoring/break-glass exclusions and at least one --include-account; apply also needs an interactive terminal.'; exit 2; fi
 if [[ "$kill_persistence" == true && ${#remove_units[@]} -eq 0 && ${#remove_cron_files[@]} -eq 0 ]]; then log ERROR 'Persistence removal requires explicitly named targets.'; exit 2; fi
@@ -188,7 +217,7 @@ if [[ "$apply" != true ]]; then
     [[ "$rotate" != true ]] || for name in "${include[@]}"; do log FLAG "PLAN ONLY: would rotate explicitly selected account $name after per-account confirmation."; done
     [[ "$kill_persistence" != true ]] || log FLAG "PLAN ONLY: would disable/remove only the ${#remove_units[@]} named units and ${#remove_cron_files[@]} named cron files after confirmation."
     [[ "$set_account_policy" != true ]] || log FLAG 'PLAN ONLY: would configure pam_pwquality, pam_unix history, pam_faillock, and login.defs after preflight/backups.'
-    [[ "$host_firewall" != true ]] || log FLAG "PLAN ONLY: would default-drop inbound, allow detected service listeners, scope SSH to ${management_cidr[*]}, and arm rollback."
+    [[ "$host_firewall" != true ]] || log FLAG "PLAN ONLY: would default-drop inbound, keep ping, allow detected listeners from every source (minus any --skip-port), allow SSH from ${management_cidr[*]:-every source (--public-ssh)}, and arm rollback."
 fi
 if [[ "$set_account_policy" == true ]]; then configure_account_policy; fi
 if [[ "$host_firewall" == true ]]; then configure_host_firewall; fi

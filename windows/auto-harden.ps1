@@ -4,8 +4,8 @@
 Detects the host role and applies every applicable hardening category without prompting.
 Compatible with Windows PowerShell 5.1+.
 .DESCRIPTION
-Always runs first-hour (account policy, legacy protocols, USB storage, host firewall scoped to the
-local subnet(s)), then the role scripts that match what is installed: domain controller, IIS web,
+Always runs first-hour (account policy, legacy protocols, USB storage, additive host firewall),
+then the role scripts that match what is installed: domain controller, IIS web,
 IIS FTP, and workstation. Each step runs in its own process so one failure does not stop the rest.
 Use -PlanOnly to preview. Password rotation and scheduled-task disabling are never automatic.
 #>
@@ -65,14 +65,13 @@ $skipRp = @(); if ($isServer) { $skipRp = @('-SkipRestorePoint') }
 
 $firstHour = @('-SetAccountPolicy', '-DisableLegacyProtocols', '-RequireSmbSigning') + $mode + $skipRp + @('-ReportDirectory', $ReportDirectory)
 if (-not $KeepSpooler) { $firstHour += '-DisableSpooler' }
-if (-not $isServer) { $firstHour += '-ScopeSystemPorts' }
 if (-not $SkipUsb) { $firstHour += '-DisableUsbStorage' }
 if (-not $SkipFirewall) {
     if ($ManagementRange.Count -eq 0) { $ManagementRange = @(Get-LocalSubnets | Select-Object -Unique) }
     if ($ManagementRange.Count -gt 0) {
         $firstHour += '-EnforceHostFirewall'
         foreach ($range in $ManagementRange) { $firstHour += @('-ManagementRange', $range) }
-        Write-Step "Firewall management scope: $($ManagementRange -join ', ')"
+        Write-Step 'Firewall preserves existing allows and scopes; no narrowing switches are enabled.'
     } else { Write-Warning 'No usable local subnet found; firewall step skipped.' }
 }
 Invoke-Step 'first-hour (common)' (Join-Path $here 'first-hour.ps1') $firstHour

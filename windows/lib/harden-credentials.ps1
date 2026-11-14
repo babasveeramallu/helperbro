@@ -3,14 +3,17 @@
 .SYNOPSIS
 Module 1 - Credential and local system hardening (PowerShell 5.1 and 7+).
 .DESCRIPTION
-Renames/rotates the built-in Administrator, disables Guest, optionally mass-rotates enabled local accounts,
+Optionally renames/rotates the built-in Administrator (explicit switches only), disables Guest, optionally mass-rotates enabled local accounts,
 enables LSA protection, forces NTLMv2-only, disables PowerShell v2, enables Defender cloud protection and strict UAC.
 Passwords are never printed or logged: they are written to a passphrase-encrypted store (AES-256 + HMAC)
 BEFORE any password is changed, inside an ACL-restricted -OutputDirectory.
 .PARAMETER AuditOnly   Check state only; change nothing.
 .PARAMETER Force       Skip the 'type APPLY' prompt (automation).
 .PARAMETER OutputDirectory  Where logs and the encrypted credential store go (ACL-restricted).
-.PARAMETER NewAdminName     New name for the built-in Administrator (SID -500).
+.PARAMETER NewAdminName     New name for the built-in Administrator (SID -500), used with -RenameAdministrator.
+.PARAMETER RenameAdministrator  Rename the built-in Administrator to -NewAdminName (never done implicitly).
+.PARAMETER RotateAdministrator  Rotate the built-in Administrator's password (never done implicitly).
+                            Neither applies when it is the current user or is used by a service/task.
 .PARAMETER RotateAllEnabledUsers  Also rotate every other enabled local account (never done implicitly).
 .PARAMETER ExcludeUsers     Accounts never rotated (scoring/service accounts). The current user and accounts
                             used by running services / stored-password tasks are always protected.
@@ -25,6 +28,8 @@ param(
     [switch]$Force,
     [string]$OutputDirectory = (Join-Path $env:LOCALAPPDATA 'CCDC\Reports'),
     [string]$NewAdminName = 'SecAdmin_Local',
+    [switch]$RenameAdministrator,
+    [switch]$RotateAdministrator,
     [switch]$RotateAllEnabledUsers,
     [string[]]$ExcludeUsers = @(),
     [ValidateRange(16, 64)][int]$PasswordLength = 24,
@@ -63,12 +68,18 @@ else {
 
         if ($admin) {
             $inUse = Test-CCDCAccountInUse -Name $admin.Name
-            if ($inUse) { Write-Log SKIP "Built-in Administrator '$($admin.Name)' is used by $inUse; not renamed or rotated (SLA protection)." }
+            if (-not ($RenameAdministrator -or $RotateAdministrator)) {
+                Write-Log INFO "Built-in Administrator '$($admin.Name)' left unchanged (use -RenameAdministrator or -RotateAdministrator)."
+            }
+            elseif ($admin.Name -eq $me) { Write-Log SKIP "Built-in Administrator '$($admin.Name)' is the current user; not renamed or rotated (would lock you out of this session)." }
+            elseif ($inUse) { Write-Log SKIP "Built-in Administrator '$($admin.Name)' is used by $inUse; not renamed or rotated (SLA protection)." }
             else {
-                Invoke-CCDCChange -Description "Rename built-in Administrator '$($admin.Name)' -> '$NewAdminName'" `
-                    -IsCompliant { (Get-LocalUser | Where-Object { $_.SID.Value -match '-500$' }).Name -ceq $NewAdminName } `
-                    -Apply { Rename-LocalUser -InputObject (Get-LocalUser | Where-Object { $_.SID.Value -match '-500$' }) -NewName $NewAdminName }
-                if (($ExcludeUsers -notcontains $admin.Name) -and ($ExcludeUsers -notcontains $NewAdminName)) {
+                if ($RenameAdministrator) {
+                    Invoke-CCDCChange -Description "Rename built-in Administrator '$($admin.Name)' -> '$NewAdminName'" `
+                        -IsCompliant { (Get-LocalUser | Where-Object { $_.SID.Value -match '-500$' }).Name -ceq $NewAdminName } `
+                        -Apply { Rename-LocalUser -InputObject (Get-LocalUser | Where-Object { $_.SID.Value -match '-500$' }) -NewName $NewAdminName }
+                }
+                if ($RotateAdministrator -and ($ExcludeUsers -notcontains $admin.Name) -and ($ExcludeUsers -notcontains $NewAdminName)) {
                     $planned.Add([pscustomobject]@{ Sid = $admin.SID.Value; Role = 'BuiltInAdministrator' })
                 }
             }

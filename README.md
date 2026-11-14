@@ -730,7 +730,7 @@ the tool run; investigate any detection through your normal security process.
 - **Scored services:** confirm each still works after firewall changes. Existing allows are preserved by default; system/RPC and RDP/WinRM helper rules are range-limited only when their explicit scoping switch is selected.
 - **Legacy auth:** LmCompatibilityLevel 5 means NTLMv1 clients fail; SMB signing means old SMB clients fail.
 - **Printing:** stops if the Spooler was disabled.
-- **Accounts:** `SecAdmin_Local` (the disabled built-in administrator) remains in the local Administrators group; review it.
+- **Accounts:** if `-RenameAdministrator` was used, `SecAdmin_Local` (the renamed built-in administrator) remains in the local Administrators group; review it.
 - **Logs and rollback:** reports, baselines and the firewall `.wfw` backup are in `%LOCALAPPDATA%\CCDC\Reports`, and a restore point is created before changes on workstations.
 
 
@@ -744,7 +744,7 @@ Each module runs on its own, in PowerShell 5.1 or 7+, as Administrator. All supp
 
 | Script | What it does |
 |---|---|
-| `harden-credentials.ps1` | Renames built-in Administrator to `SecAdmin_Local` (`-NewAdminName`), disables Guest, optional mass password rotation (`-RotateAllEnabledUsers -ExcludeUsers a,b`), LSA `RunAsPPL=1`, `LmCompatibilityLevel=5`, WDigest off, UAC `EnableLUA=1`/`ConsentPromptBehaviorAdmin=2`, disables PowerShell v2, Defender cloud protection. Rotated passwords go to an AES-256 encrypted `credstore-*.dat` (passphrase prompt); view with `-ShowCredentials`. Never rotates the current user or accounts used by services/password-logon tasks. |
+| `harden-credentials.ps1` | Only when asked: renames the built-in Administrator to `SecAdmin_Local` (`-RenameAdministrator`, `-NewAdminName`) and rotates its password (`-RotateAdministrator`), never when it is the current user or used by a service or task. Disables Guest, optional mass password rotation (`-RotateAllEnabledUsers -ExcludeUsers a,b`), LSA `RunAsPPL=1`, `LmCompatibilityLevel=5`, WDigest off, UAC `EnableLUA=1`/`ConsentPromptBehaviorAdmin=2`, disables PowerShell v2, Defender cloud protection. Rotated passwords go to an AES-256 encrypted `credstore-*.dat` (passphrase prompt); view with `-ShowCredentials`. Never rotates the current user or accounts used by services/password-logon tasks. |
 | `disable-legacy-protocols.ps1` | Disables SMB1 (feature + server config), LLMNR, NetBIOS over TCP/IP. Firewall: backs up first (`.wfw`), keeps ICMP echo (v4 and v6) allowed, allows listening scoring ports, scopes RDP/WinRM to `-ManagementSubnets`, then sets all profiles Enabled / inbound Block / outbound Allow. Extra ports: `-AllowTcpPorts`, `-AllowUdpPorts`; `-AllowSmb` keeps 139/445. |
 | `harden-ad.ps1` | Domain controllers only. Audits Kerberoastable accounts (SPNs), DES-only accounts and privileged group membership; LDAP signing (`LDAPServerIntegrity=2`) + channel binding (`-LdapChannelBinding`); AES-only Kerberos. `-ResetKrbtgt` does the double reset with typed confirmation (`RESET KRBTGT`, required even with `-Force`). |
 | `audit-windows-persistence.ps1` | Sweeps non-Microsoft scheduled tasks, Run/RunOnce, Winlogon, Startup folders, IFEO, WMI subscriptions, services outside System32/Program Files. Enables script block logging (4104) and transcription (`-TranscriptDirectory`). Saves a JSON summary object. |

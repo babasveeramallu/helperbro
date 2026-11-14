@@ -131,7 +131,9 @@ configure_host_firewall() {
                 printf '  %s dport %s accept\n' "$proto" "$port"
             fi
         done
-        printf '%s\n' ' }' ' chain forward { type filter hook forward priority -20; policy drop; }' '}'
+        # Input only: a forward chain with policy drop would also drop Docker-published ports and
+        # routed or guest traffic, because a drop in any base chain is final in nftables.
+        printf '%s\n' ' }' '}'
     } > "$rules"
     nft -c -f "$rules" || { log ERROR "nft rejected candidate host rules $rules"; return 2; }
     log INFO "Candidate host rules (audit-only unless --apply): $rules"

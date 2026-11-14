@@ -10,6 +10,13 @@ The diagram says **Rocky Linux**; the version, address, web server, application,
 database and container layout are **unknown**. Do not assume WordPress, Apache,
 Nginx, MariaDB or Docker is installed.
 
+The supplied scoreboard confirms **`ecomm-http` and `ecomm-ping`**.
+The `ecomm` prefix maps to this role, not a verified hostname. HTTP commonly
+uses TCP 80, but the screenshot does not give the port, vhost, path, expected
+content or redirect behavior. Ping is ICMP, not a TCP/UDP port. SSH, HTTPS and
+FTP are not separate named checks in this snapshot; preserve any required
+administration and application dependencies rather than guessing extra services.
+
 | Record before changing anything | Actual value |
 |---|---|
 | Hostname / Rocky version / IP / default route | `REPLACE_VERIFIED_VALUES` |
@@ -20,7 +27,7 @@ Nginx, MariaDB or Docker is installed.
 | Container-published ports / active firewall owner | `REPLACE_OR_NOT_APPLICABLE` |
 | Backup, console contact and approved maintenance window | `REPLACE_VERIFIED_VALUES` |
 
-HTTP 80 and HTTPS 443 are common, not a verified scoring list. Keep required
+HTTP 80 and HTTPS 443 are common defaults, not verified scoring ports. Keep required
 ping, SSH authentication, DNS and backend paths. Public services must remain
 generally reachable where required by current event rules.
 

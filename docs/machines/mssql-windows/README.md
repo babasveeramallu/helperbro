@@ -9,6 +9,11 @@ Confirm the live hostname/address, SQL edition/version, instance, database,
 authentication mode, engine account, SQL port, required SMB share/file and RDP
 identity before changing anything.
 
+The supplied scoreboard confirms **`mssql-mssql`, `mssql-ping`, `mssql-rdp`,
+`mssql-smb`**. The first is the SQL check, not a second machine. Its exact query,
+credentials, instance/port, required SMB content and RDP transaction must still
+come from the live scoring definition. Ping uses ICMP, not a TCP/UDP port.
+
 This machine is not only a SQL port. Preserve all three packet functions:
 
 | Function | Packet starting point | Actual acceptance |

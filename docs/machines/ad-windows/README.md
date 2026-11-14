@@ -11,6 +11,11 @@ time source, service accounts and scoring credentials through approved channels.
 The source AD/DNS role script targets **Server 2019**; test compatibility on a
 matching noncompetition 2022 DC before applying it.
 
+The supplied scoreboard confirms **`ad-dns`, `ad-ping`, `ad-winrm`**.
+Verify the DNS answer and WinRM transaction in the portal, not just listeners.
+Usual endpoints are DNS TCP/UDP 53, ICMP echo and packet WinRM TCP 5985
+(5986 only if configured); the screenshot itself does not show ports/accounts.
+
 Keep domain login, DNS, Kerberos, LDAP, SYSVOL/SMB, replication, required time
 service, scored authenticated WinRM and ping working. Do not equate opening
 5985 with a working WinRM login. Do not rename accounts or reset `krbtgt` as an

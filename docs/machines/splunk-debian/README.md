@@ -10,13 +10,24 @@ Those are **unverified packet values**, not a live inventory or a claim that the
 installed version is patched. Record the real version, hostname, address,
 installation owner, unit name, storage paths, license and scoring checks.
 
+The supplied scoreboard confirms **five** checks: **`splunk-chrony`,
+`splunk-mgmt`, `splunk-ping`, `splunk-query`, `splunk-ssh`**. Chrony and SSH
+are explicitly scored, not optional housekeeping. The screenshot does not show
+ports, accounts or transactions; do not infer those from the column names alone.
+
 | Endpoint | Purpose / boundary |
 |---|---|
-| TCP 8089 | Packet-scored query/management and its authentication |
-| TCP 8000, if configured | Splunk Web; verify whether also scored |
+| UDP 123 usual NTP default | Verify `splunk-chrony` against the real time service and remote client path |
+| TCP 8089 packet default | Management API/search and authentication; verify both `splunk-mgmt` and `splunk-query` definitions |
+| TCP 8000, if configured | Splunk Web; the screenshot does not establish whether either check uses it |
 | TCP 9997 default | Splunk-to-Splunk forwarder receiving, not raw syslog |
 | TCP 20514 example | Separate optional plaintext syslog input; **not** configured by the script |
-| SSH actual port and ICMP | Administration and any actual scored SSH; preserve required ping |
+| SSH actual port, usually TCP 22 | `splunk-ssh`: verify a new authorized login |
+| ICMP echo | `splunk-ping`; not a TCP/UDP port |
+
+Management and query may share an endpoint; do not invent a separate port for
+each. TCP 9997 and example 20514 support logging but are not named scored checks
+in this snapshot. No script here configures or hardens chrony.
 
 Never delete indexed data, reset a scoring password, change the machine identity
 or source-limit public services as a routine hardening step. Coordinate any
@@ -194,6 +205,27 @@ sudo tail -n 100 "$SPLUNK_HOME/var/log/splunk/splunkd.log"
 Confirm correct process ownership, index state, disk health and actual query/
 management login. A socket or Web login alone does not establish scoring.
 
+Also verify **both** management and query definitions, a new SSH login, ping
+and chrony. Do not mark the machine healthy solely because ingestion works.
+
+For an existing chrony installation, inspect without changing the clock/config:
+
+```bash
+# Confirm the actual unit name first; Debian commonly uses chrony.service.
+systemctl status chrony --no-pager
+chronyc tracking
+chronyc sources -v
+sudo ss -lunp 'sport = :123'
+```
+
+Missing commands, an inactive unit or a different configured time product need
+investigation, not a blind chrony installation/replacement. Local synchronization
+and a UDP listener do not prove that the scorer can receive an NTP reply. From
+an authorized client, verify the actual scored NTP transaction and access policy.
+Do not enable chrony's remote command port merely because NTP is scored, force
+a clock step or overwrite time sources as routine hardening. Time changes also
+affect log correlation and domain authentication.
+
 ### B. New Windows marker
 
 Have each sender operator generate the marker shown in their README, then
@@ -236,7 +268,8 @@ and exact new marker; the index name is not known in advance.
 | Files match but port absent | Runtime errors/overrides; rerunning is not a guaranteed repair |
 | TCP works, search empty | Source event, output route, index enabled/permissions, license, disk, time and parsing |
 | One sender silent | That host's UF state/identity/channels and `TcpOutputProc` errors |
-| Scoring red after receiver change | Query/8089/authentication and coordinated app recovery; stop further changes |
+| Scoring red after receiver change | Identify which of the five checks failed; inspect its actual endpoint/authentication and coordinated recovery; stop further changes |
+| Chrony check fails | Actual NTP daemon, synchronization, UDP bind, client access rules and network policy; Web/API tests are unrelated |
 | Disk nearly full | Index storage and retention owner; never delete buckets as emergency housekeeping |
 
 The receiver attempts app restoration on errors after its rollback trap is armed,
@@ -266,5 +299,6 @@ Do not run a real receiver apply as a documentation test.
 - [ ] Restart window, backup path and transport approval recorded.
 - [ ] AD, MSSQL, Windows workstation and each configured Linux sender proved a new marker.
 - [ ] Windows XML fields and actual SQL log parsing checked; gaps explicit.
-- [ ] Query/8089, Web if required, SSH, ping and disk remain healthy.
+- [ ] All five named checks verified: chrony, management, query, SSH and ping.
+- [ ] Actual Web/API port mapping, disk health and ingestion verified separately.
 - [ ] No passwords, raw secret-bearing logs or private keys committed.

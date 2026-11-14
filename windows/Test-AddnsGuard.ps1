@@ -19,8 +19,13 @@ function Write-Log { param($Level, $Message) Write-Host "$Level $Message" }
 function Assert-CCDCAdmin {
     if ($global:FixtureScenario -eq 'not-admin') { throw 'Mock elevation required' }
 }
-function Get-CCDCBaseline { param($IsDomainJoined, $Path) }
-function Show-CCDCCommonHostAudit {}
+function Get-CCDCBaseline {
+    param($IsDomainJoined, $Path)
+    Add-Content -LiteralPath $global:FixtureCalls -Value 'baseline' -WhatIf:$false
+}
+function Show-CCDCCommonHostAudit {
+    Add-Content -LiteralPath $global:FixtureCalls -Value 'host-audit' -WhatIf:$false
+}
 function Complete-CCDCRole {}
 function Get-Module { param([switch]$ListAvailable, $Name) }
 function Get-Service { param($Name, $ErrorAction) if ($Name -eq 'DNS') { [pscustomobject]@{ Status = 'Running' } } }
@@ -62,10 +67,13 @@ exit $LASTEXITCODE
         $output = & $shell -NoProfile -File (Join-Path $fixture 'invoke.ps1') -Scenario $case.Name -Calls $calls 2>&1 | Out-String
         $code = $LASTEXITCODE
         $lines = if (Test-Path -LiteralPath $calls) { @(Get-Content -LiteralPath $calls) } else { @() }
+        $baseline = @($lines | Where-Object { $_ -eq 'baseline' }).Count -gt 0
+        $hostAudit = @($lines | Where-Object { $_ -eq 'host-audit' }).Count -gt 0
         $enumerated = @($lines | Where-Object { $_ -eq 'enumerate' }).Count -gt 0
         $changes = @($lines | Where-Object { $_ -like 'change:*' }).Count
-        if ($code -ne $case.Code -or $enumerated -ne $case.Enumerated -or $changes -ne $case.Changes -or $output -notmatch [regex]::Escape($case.Message)) {
-            throw "FAIL $($case.Name): exit=$code enumerated=$enumerated changes=$changes output=$output"
+        $allowed = $case.Code -eq 0
+        if ($code -ne $case.Code -or $baseline -ne $allowed -or $hostAudit -ne $allowed -or $enumerated -ne $case.Enumerated -or $changes -ne $case.Changes -or $output -notmatch [regex]::Escape($case.Message)) {
+            throw "FAIL $($case.Name): exit=$code baseline=$baseline hostAudit=$hostAudit enumerated=$enumerated changes=$changes output=$output"
         }
         Write-Host "PASS $($case.Name)"
     }

@@ -35,7 +35,7 @@ $script:LeftAlone = [System.Collections.Generic.List[string]]::new()
 . (Join-Path $PSScriptRoot 'lib\Common.ps1')
 . (Join-Path $PSScriptRoot 'lib\HostFirewall.ps1')
 . (Join-Path $PSScriptRoot 'lib\Hardening.ps1')
-. (Join-Path $PSScriptRoot 'lib\Obfuscation.ps1')
+. (Join-Path $PSScriptRoot 'lib\CredentialProtection.ps1')
 . (Join-Path $PSScriptRoot 'lib\RestorePoint.ps1')
 . (Join-Path $PSScriptRoot 'lib\Sysinternals.ps1')
 . (Join-Path $PSScriptRoot 'lib\UsbStorage.ps1')
@@ -289,6 +289,10 @@ try {
             }
         }
         if ($selected.Count -eq 0) { throw 'No enabled, explicitly selected local accounts remain after exclusions.' }
+        $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        if (@($selected | Where-Object { $_.SID.Value -eq $currentSid }).Count) {
+            throw 'Cannot rotate the current account: resetting its password may make its DPAPI-protected recovery file unreadable. Run as a different administrator.'
+        }
         foreach ($user in $selected) { Write-Log FLAG "Password rotation candidate $($user.Name) SID=$($user.SID)" }
         $phrase = "ROTATE $($selected.Count) LOCAL PASSWORDS"
         $answer = Read-Host "Type '$phrase' to rotate only these selected accounts"
@@ -300,17 +304,23 @@ try {
         }
         if (-not (Test-Path -LiteralPath $ledger)) { New-Item -ItemType File -Path $ledger | Out-Null }
         New-Item -ItemType File -Path $credentialPath -ErrorAction Stop | Out-Null
-        $fileAcl = Get-Acl -LiteralPath $credentialPath
         $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
         & icacls.exe $credentialPath /inheritance:r /grant:r ("*{0}:F" -f $me.Value) '*S-1-5-18:F' | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not restrict credential file ACL: $credentialPath" }
         foreach ($user in $selected) {
             $password = New-RandomPassword
             if ($PSCmdlet.ShouldProcess($user.Name, 'Rotate local password (one-shot)')) {
-                Add-Content -LiteralPath $credentialPath -Value "$($user.Name)`t$(ConvertTo-CCDCObfuscated $password)`tPENDING" -Encoding UTF8
+                $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+                $protected = Protect-CCDCCredential -Password $securePassword
+                Add-Content -LiteralPath $credentialPath -Value "$($user.Name)`t$protected`tPENDING" -Encoding UTF8
+                $saved = @(Get-Content -LiteralPath $credentialPath -Tail 1 -ErrorAction Stop)[0] -split "`t"
+                if ($saved.Count -ne 3 -or $saved[0] -cne $user.Name -or
+                    ([Net.NetworkCredential]::new('', (Unprotect-CCDCCredential $saved[1])).Password -cne $password)) {
+                    throw "Credential recovery verification failed for $($user.Name); password not changed."
+                }
                 try {
                     Add-Content -LiteralPath $ledger -Value $user.SID.Value -Encoding UTF8
-                    Set-LocalUser -Name $user.Name -Password (ConvertTo-SecureString $password -AsPlainText -Force)
+                    Set-LocalUser -Name $user.Name -Password $securePassword
                     Add-Content -LiteralPath $credentialPath -Value "$($user.Name)`tCHANGED" -Encoding UTF8
                     Write-Log CHANGE "Rotated local password for $($user.Name); secret stored in protected output."
                 } catch {
@@ -320,7 +330,7 @@ try {
             }
             $password = $null
         }
-        Write-Log INFO "Credential output restricted to current user: $credentialPath"
+        Write-Log INFO "Credential output protected with current-user DPAPI: $credentialPath"
     }
 
     if (-not $writeRequested) { Write-Log INFO 'Audit-only complete; no changes requested.' }

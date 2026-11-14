@@ -613,6 +613,52 @@ Nothing rotates passwords automatically, so `auto-harden.ps1` never generates an
 - Older `rotated-credentials-*.txt` files containing `obf:` entries are insecure and are not decoded by the updated viewer. Treat their passwords as exposed, rotate them again safely if needed, and securely remove those files and any copies. The update does not remove existing files automatically.
 - If an interrupted write leaves a malformed or undecryptable entry, the viewer still displays other readable credentials, then reports failure and retains the file without offering deletion. Recover those credentials securely and investigate the incomplete entry.
 
+### Standalone password rotation and fake credential files
+
+The former diagnostics-named helper has been replaced by
+[`windows\Rotate-LocalPasswords.ps1`](windows/Rotate-LocalPasswords.ps1).
+It requires elevated Windows PowerShell 5.1 or PowerShell 7 and changes only
+explicitly selected local accounts. It does not configure other hardening.
+Wildcard account selectors are refused. Relative store paths and directories
+resolve against the current PowerShell filesystem location.
+Exclude scoring, service, scheduled-task and break-glass accounts yourself;
+this helper does not discover their dependencies. Domain controllers are refused.
+
+```powershell
+.\windows\Rotate-LocalPasswords.ps1 -Account example-local-user -WhatIf
+.\windows\Rotate-LocalPasswords.ps1 -Account example-local-user
+.\windows\Rotate-LocalPasswords.ps1 -Action Show
+```
+
+The helper prompts for a passphrase and writes an ACL-restricted,
+passphrase-encrypted `local-passwords-*.dat` recovery store under
+`%LOCALAPPDATA%\helperbro\Credentials` (override with `-StoreDirectory`).
+The store is verified before any password changes. A failure during rotation
+can leave a partial result; check each account rather than assuming all changed.
+`-WhatIf` writes nothing and changes no accounts. Keep the passphrase in your
+team's secure store; losing it prevents recovery. After recording credentials
+securely, set `$StoreFile` to the actual store path and use
+`Remove-Item -LiteralPath $StoreFile`. Protect console transcripts as secrets.
+
+Existing encrypted files from the old helper remain readable using
+`-Action Show -StorePath <actual-file-path>` and their original passphrase.
+The new helper does not search, move, or delete files in the former storage
+location automatically. Record their contents securely, then remove those
+specific files and any copies; never delete a Windows directory to clean them up.
+
+The separate [`windows\New-DecoyCredentialFile.ps1`](windows/New-DecoyCredentialFile.ps1)
+writes clearly labeled **fake** values under `%LOCALAPPDATA%\helperbro\Decoys`;
+it never reads or changes account passwords. Use only for an approved defensive
+exercise. It supports `-WhatIf`, confirmation and `-OutputDirectory`. It does
+not install monitoring or detect access to its output.
+
+Run `.\windows\Test-LocalPasswordTools.ps1` for synthetic recovery-store and
+mocked rotation/decoy tests; no real accounts are changed. These checks do not
+prove that Defender will accept a fresh clone. Validate a fresh download on a
+Windows 11 test VM with current Defender real-time protection enabled. Do not
+disable Defender, add exclusions, or restore a quarantined file merely to make
+the tool run; investigate any detection through your normal security process.
+
 ### After a hardening run
 - **Reboot:** required for LSASS protection (RunAsPPL) to take effect.
 - **Auto-logon is turned off:** you must know the local account password to sign in again.

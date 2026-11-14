@@ -36,6 +36,9 @@ if ((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).DomainRole -ge 4) {
     throw 'Domain controllers have no local SAM accounts; this tool does not rotate domain passwords.'
 }
 $users = @(foreach ($name in ($Account | Sort-Object -Unique)) {
+    if ([System.Management.Automation.WildcardPattern]::ContainsWildcardCharacters($name)) {
+        throw "Specify a literal local account name, not a wildcard pattern: $name"
+    }
     $user = Get-LocalUser -Name $name -ErrorAction Stop
     if (-not $user) { throw "Unknown local account: $name" }
     $user

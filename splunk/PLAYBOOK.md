@@ -297,7 +297,8 @@ Run from the repository root containing the `splunk` directory, **not** from
 inside that directory. If you copied only that directory, omit the leading
 `.\splunk\` from the commands. Set `$Indexer` and `$Port` to the verified
 receiver and forwarder receiving port in each PowerShell session before
-running any audit, installer or apply example. Use the same values throughout.
+running audit, installer, apply or verification commands. Use the same values
+throughout.
 
 ```powershell
 # AD host
@@ -636,6 +637,9 @@ Adjust the service/home to the values used during setup. Confirm the listener is
 scoring status in the portal after its restart; an active unit alone is insufficient.
 
 ### B. Windows service, routing and source checks
+
+In each PowerShell session, set `$Indexer` and `$Port` to the verified receiver
+and forwarder receiving port used during setup before running these commands.
 
 ```powershell
 $uf = 'C:\Program Files\SplunkUniversalForwarder'

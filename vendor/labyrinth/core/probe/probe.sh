@@ -46,11 +46,17 @@ lab_probe_connect() {
 # lab_probe_http PROTO HOST PORT EXPECT TIMEOUT [PATH]: PATH defaults to /. A
 # redirect is never followed, so a probe cannot be sent to another host.
 lab_probe_http() {
-  local proto="$1" host="$2" port="$3" expect="$4" t="$5" path="${6:-/}" url out code body status authority
+  local proto="$1" host="$2" port="$3" expect="$4" t="$5" path="${6:-/}" url out code body status authority rc detail
   url="$proto://$(lab_probe_hostpart "$host"):$port$path"
   if command -v curl > /dev/null 2>&1; then  # lab-guard: allow network -- only checks whether curl is installed
-    if ! out="$(curl -q -sS --globoff --noproxy '*' --max-time "$t" --max-filesize 65536 -w '\n%{http_code}' -- "$url" 2>&1 | tr -d '\000')"; then
-      printf 'fail %s\n' "$(printf '%s' "$out" | tail -n 1)"
+    if out="$(curl -q -sS --globoff --noproxy '*' --max-time "$t" --max-filesize 65536 -w '\n%{http_code}' -- "$url" 2>&1 | tr -d '\000')"; then
+      :
+    else
+      rc=$?
+      [[ "$out" != *$'\n'[0-9][0-9][0-9] ]] || out="${out%$'\n'*}"
+      detail="$(printf '%s' "$out" | tail -n 1)"
+      [[ -n "$detail" && ! "$detail" =~ ^[0-9]{3}$ ]] || detail='no diagnostic'
+      printf 'fail curl exited %s: %s\n' "$rc" "$detail"
       return 0
     fi
     code="${out##*$'\n'}"

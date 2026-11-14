@@ -481,12 +481,14 @@ Expected results and troubleshooting:
 [Verification procedure](splunk/PLAYBOOK.md#7-prove-end-to-end-delivery) and
 [troubleshooting matrix](splunk/PLAYBOOK.md#8-troubleshooting-by-symptom).
 
-On each Windows host, after installation/configuration:
+On each Windows host, after installation/configuration, set `$Indexer` and
+`$Port` in the current PowerShell session to the verified receiver and
+forwarder receiving port used during setup:
 
 ```powershell
 $uf = 'C:\Program Files\SplunkUniversalForwarder'
 Get-Service SplunkForwarder
-Test-NetConnection 172.20.240.20 -Port 9997
+Test-NetConnection $Indexer -Port $Port
 & "$uf\bin\splunk.exe" btool outputs list --debug
 & "$uf\bin\splunk.exe" btool inputs list --debug
 & "$uf\bin\splunk.exe" list forward-server

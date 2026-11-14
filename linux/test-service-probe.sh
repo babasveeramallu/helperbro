@@ -13,7 +13,8 @@ mkdir -p "$fixture/bin"
 cat > "$fixture/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$PROBE_ARGS"
-if [[ ${PROBE_CURL_FAIL:-0} == 1 ]]; then echo 'certificate rejected' >&2; exit 60; fi
+if [[ ${PROBE_CURL_FAIL:-0} == 1 ]]; then echo 'certificate rejected' >&2; printf '\n000'; exit 60; fi
+if [[ ${PROBE_CURL_NO_DIAG:-0} == 1 ]]; then printf '\n000'; exit 7; fi
 printf '%s\n%s' "${PROBE_BODY:-Welcome}" "${PROBE_CODE:-200}"
 EOF
 cat > "$fixture/bin/dig" <<'EOF'
@@ -47,7 +48,8 @@ PROBE_CODE=400 check 1 'fail status 400' http example.test 80
 PROBE_CODE=199 check 1 'fail status 199' http example.test 80
 check 1 'expected text is missing' http example.test 80 --expect Missing
 PROBE_CODE=503 check 1 'fail status 503' http example.test 80
-PROBE_CURL_FAIL=1 check 1 'certificate rejected' https example.test 443
+PROBE_CURL_FAIL=1 check 1 'curl exited 60: certificate rejected' https example.test 443
+PROBE_CURL_NO_DIAG=1 check 1 'curl exited 7: no diagnostic' https example.test 443
 check 0 'pass example.test answered 192.0.2.10' dns example.test 53 --expect example.test=192.0.2.10
 check 1 'did not answer' dns example.test 53 --expect example.test=192.0.2.11
 PROBE_DNS_ANSWER=$'192.0.2.1\n2001:DB8::1' check 0 'answered 2001:db8::1' dns example.test 5353 --expect example.test=2001:db8::1
@@ -251,7 +253,7 @@ EOF
         port=$(cat "$port_file")
         if [[ $mode == https ]]; then
             PATH="$fixture/realbin:$PATH" CURL_HOME="$fixture/curl-home" \
-                check 1 'fail ' https 127.0.0.1 "$port" --expect Welcome
+                check 1 'curl exited 60:' https 127.0.0.1 "$port" --expect Welcome
         else
             PATH="$fixture/realbin:$PATH" CURL_HOME="$fixture/curl-home" \
                 check 1 'expected text is missing' http 127.0.0.1 "$port" --path /redirect --expect Welcome

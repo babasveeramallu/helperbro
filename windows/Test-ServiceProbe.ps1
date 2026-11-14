@@ -73,7 +73,8 @@ function Invoke-LabProbe {
         return "HTTP/1.0 200 OK`r`n`r`nWelcome"
     }
     function Resolve-DnsName {
-        param($Name,$Server,$Type,[switch]$DnsOnly,[switch]$QuickTimeout,$ErrorAction)
+        param($Name,$Server,$Type,[switch]$DnsOnly,[switch]$NoHostsFile,[switch]$QuickTimeout,$ErrorAction)
+        $script:DnsQuery = @{ Server=$Server; DnsOnly=$DnsOnly.IsPresent; NoHostsFile=$NoHostsFile.IsPresent }
         [pscustomobject]@{ IPAddress = '192.0.2.10' }
     }
     if ((Invoke-LabProbe -Proto http -Target example.test -Port 80 -Expect Welcome) -ne 'pass status 200') { throw 'FAIL HTTP response' }
@@ -81,7 +82,8 @@ function Invoke-LabProbe {
     if ((Invoke-LabProbe -Proto http -Target '::1' -Port 8080 -Expect Welcome) -ne 'pass status 200' -or
         $script:ProbeRequest -notmatch 'Host: \[::1\]:8080') { throw 'FAIL HTTP host header' }
     if ((Invoke-LabProbe -Proto smtp -Target example.test -Port 25 -Expect '-') -ne 'pass banner received') { throw 'FAIL SMTP banner' }
-    if ((Invoke-LabProbe -Proto dns -Target example.test -Port 53 -Expect 'example.test=192.0.2.10') -notlike 'pass *') { throw 'FAIL DNS answer' }
+    if ((Invoke-LabProbe -Proto dns -Target resolver.test -Port 53 -Expect 'example.test=192.0.2.10') -notlike 'pass *') { throw 'FAIL DNS answer' }
+    if ($script:DnsQuery.Server -ne 'resolver.test' -or -not $script:DnsQuery.DnsOnly -or -not $script:DnsQuery.NoHostsFile) { throw 'FAIL DNS resolver options' }
     if ((Invoke-LabProbe -Proto dns -Target example.test -Port 53 -Expect 'example.test=192.0.2.11') -notlike 'fail *') { throw 'FAIL DNS mismatch' }
     if ((Invoke-LabProbe -Proto dns -Target example.test -Port 54 -Expect 'example.test=192.0.2.10') -notlike 'unknown *') { throw 'FAIL unsupported DNS port' }
     Write-Host 'PASS DNS validation and answers, HTTP response and SMTP banner'
@@ -142,7 +144,7 @@ function Invoke-LabProbe {
     Assert-ProbeResult 'TCP connection failure' (Invoke-LabProbe -Proto tcp -Target example.test -Port 1234 -Expect '-') 'fail no connection'
     Assert-ProbeResult 'unsupported protocol' (Invoke-LabProbe -Proto bogus -Target example.test -Port 1234 -Expect '-') 'unknown unsupported protocol bogus'
     function Resolve-DnsName {
-        param($Name,$Server,$Type,[switch]$DnsOnly,[switch]$QuickTimeout,$ErrorAction)
+        param($Name,$Server,$Type,[switch]$DnsOnly,[switch]$NoHostsFile,[switch]$QuickTimeout,$ErrorAction)
         $script:DnsType = $Type
         if ($script:DnsFails) { throw 'DNS failure' }
         [pscustomobject]@{ IPAddress = '2001:db8::1' }
@@ -155,7 +157,7 @@ function Invoke-LabProbe {
     Assert-ProbeResult 'DNS error' (Invoke-LabProbe -Proto dns -Target example.test -Port 53 -Expect 'example.test=2001:db8::1') 'fail no answer from example.test'
     $script:DnsFails = $false
     function Resolve-DnsName {
-        param($Name,$Server,$Type,[switch]$DnsOnly,[switch]$QuickTimeout,$ErrorAction)
+        param($Name,$Server,$Type,[switch]$DnsOnly,[switch]$NoHostsFile,[switch]$QuickTimeout,$ErrorAction)
         [pscustomobject]@{ NameHost = '192.0.2.10'; IPAddress = 'not-an-address' }
     }
     Assert-ProbeResult 'DNS non-address record' (Invoke-LabProbe -Proto dns -Target example.test -Port 53 -Expect 'example.test=192.0.2.10') 'fail example.test did not answer 192.0.2.10'
@@ -190,11 +192,15 @@ Write-Output 'Welcome' '200'
     Write-Host 'PASS HTTP boundaries, protocol banners, TCP and DNS errors'
 
     . $module
-    foreach ($mode in @('complete', 'unicode', 'stall')) {
+    $modes = @('complete', 'unicode', 'stall')
+    if ([Net.Sockets.Socket]::OSSupportsIPv6) { $modes += 'ipv6' }
+    else { Write-Host 'SKIP IPv6 loopback: IPv6 is unsupported' }
+    foreach ($mode in $modes) {
         $ready = Join-Path $fixture "$mode.ready"
         $job = Start-Job -ArgumentList $ready, $mode -ScriptBlock {
             param($Ready, $Mode)
-            $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
+            $address = if ($Mode -eq 'ipv6') { [Net.IPAddress]::IPv6Loopback } else { [Net.IPAddress]::Loopback }
+            $listener = New-Object Net.Sockets.TcpListener($address, 0)
             try {
                 $listener.Start()
                 [IO.File]::WriteAllText($Ready, [string]$listener.LocalEndpoint.Port)
@@ -215,8 +221,9 @@ Write-Output 'Welcome' '200'
         if (-not (Test-Path -LiteralPath $ready)) { throw "FAIL $mode server did not start" }
         $port = [int](Get-Content -LiteralPath $ready)
         $expected = if ($mode -eq 'unicode') { "caf$([char]0xE9)" } else { 'Welcome' }
-        $result = Invoke-LabProbe -Proto http -Target '127.0.0.1' -Port $port -Expect $expected -Timeout 2
-        if (($mode -in @('complete', 'unicode') -and $result -ne 'pass status 200') -or
+        $target = if ($mode -eq 'ipv6') { '::1' } else { '127.0.0.1' }
+        $result = Invoke-LabProbe -Proto http -Target $target -Port $port -Expect $expected -Timeout 2
+        if (($mode -in @('complete', 'unicode', 'ipv6') -and $result -ne 'pass status 200') -or
             ($mode -eq 'stall' -and $result -notlike 'fail *')) { throw "FAIL $mode loopback: $result" }
         Stop-Job -Job $job
         Remove-Job -Job $job

@@ -29,8 +29,12 @@ and expose sensitive command lines in logs. Restore points are not guaranteed.
 Use the firewall playbook's timer if a firewall change is authorized. For
 forwarding, follow [Splunk](splunk.md) with role `Wkst`.
 
+Timed firewall rollback imports the entire exported firewall policy and may
+overwrite changes made after the snapshot. Coordinate other firewall changes
+while the timer is active.
+
 Before and after: test the intended user login, DNS, access to the assigned
 management interfaces and a new forwarded event. Confirm DHCP and routes
-remain correct. Keep a second session until access is proven. Revert only the
-documented change with its tested recovery; a firewall rollback does not undo
+remain correct. Keep a second session until access is proven. Use the tested
+recovery for the affected component; firewall rollback does not undo
 workstation hardening or forwarding.

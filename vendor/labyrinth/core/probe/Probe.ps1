@@ -21,9 +21,15 @@ function Invoke-LabTcpExchange {
         [string] $Quit = 'QUIT',
         [switch] $ConnectOnly
     )
-    $client = New-Object Net.Sockets.TcpClient
+    $client = $null
     $timer = [Diagnostics.Stopwatch]::StartNew()
     try {
+        $address = $null
+        if ([Net.IPAddress]::TryParse($Target, [ref]$address) -and $address.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6) {
+            $client = New-Object Net.Sockets.TcpClient -ArgumentList ([Net.Sockets.AddressFamily]::InterNetworkV6)
+        } else {
+            $client = New-Object Net.Sockets.TcpClient
+        }
         if (-not $client.ConnectAsync($Target, $Port).Wait($Timeout * 1000)) { return $null }
         if ($ConnectOnly) { return '' }
         $stream = $client.GetStream()
@@ -62,7 +68,7 @@ function Invoke-LabTcpExchange {
     } catch {
         return $null
     } finally {
-        $client.Close()
+        if ($client) { $client.Close() }
     }
 }
 function Get-LabHttpResult {
@@ -124,7 +130,7 @@ function Invoke-LabProbe {
             if (-not [Net.IPAddress]::TryParse($answer, [ref]$expectedAddress)) { return 'fail invalid DNS address' }
             $type = if ($answer.Contains(':')) { 'AAAA' } else { 'A' }
             try {
-                $records = @(Resolve-DnsName -Name $qname -Server $Target -Type $type -DnsOnly -QuickTimeout -ErrorAction Stop)
+                $records = @(Resolve-DnsName -Name $qname -Server $Target -Type $type -DnsOnly -NoHostsFile -QuickTimeout -ErrorAction Stop)
             } catch {
                 return "fail no answer from $Target"
             }

@@ -624,9 +624,12 @@ generated event searchable centrally. Only the third proves that source's path.
 
 ### A. Debian readiness and scoring
 
+In the current shell, set `SPLUNK_PORT` to the verified forwarder receiving
+port used during setup before checking the listener.
+
 ```bash
 sudo systemctl is-active Splunkd
-sudo ss -ltnp 'sport = :9997'
+sudo ss -ltnp "sport = :${SPLUNK_PORT:?Set SPLUNK_PORT to the verified receiving port}"
 sudo /opt/splunk/bin/splunk btool inputs list --debug
 sudo /opt/splunk/bin/splunk btool indexes list --debug
 sudo tail -n 100 /opt/splunk/var/log/splunk/splunkd.log

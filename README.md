@@ -14,6 +14,8 @@ All seven guides have distinct filenames in the top-level `runbook` folder:
 Each covers script behavior, safe execution order, parameters, verification,
 recovery and handoff. Packet values are labeled defaults, not verified live
 configuration. Run command examples from the repository root, not `runbook`.
+Each machine guide starts with download/staging steps, including Git-free curl
+options and approved offline-transfer guidance.
 
 This repository contains Linux and Windows host audit/hardening tools and a
 packet-specific Splunk deployment workflow. The Windows forwarding profiles cover

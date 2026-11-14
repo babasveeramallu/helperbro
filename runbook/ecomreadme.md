@@ -2,6 +2,51 @@
 
 [All machines](README.md) | [Generic web guide](../docs/services/web.md)
 
+## Get the toolkit onto this machine
+
+Use an approved download path and version. These examples fetch the current
+`main` branch into your own home, without applying hardening. Do not use sudo
+for downloading. Stop on errors; do not overwrite an existing deployment.
+
+**Option A: Git, if already installed**
+
+```bash
+umask 077
+git clone --branch main --single-branch \
+  https://github.com/babasveeramallu/helperbro.git "$HOME/helperbro" &&
+  cd "$HOME/helperbro" &&
+  git rev-parse HEAD
+```
+
+Confirm the printed commit is approved. If Git is missing or cloning fails,
+use this independent alternative; do not install packages without approval.
+
+**Option B: curl and tar, no Git required**
+
+```bash
+umask 077
+stage="$(mktemp -d "$HOME/helperbro.XXXXXXXX")" &&
+curl --fail --location --show-error \
+  https://github.com/babasveeramallu/helperbro/archive/refs/heads/main.tar.gz \
+  --output "$stage/helperbro.tar.gz" &&
+tar -xzf "$stage/helperbro.tar.gz" -C "$stage" &&
+cd "$stage/helperbro-main" &&
+pwd
+```
+
+This needs existing curl, tar and gzip support. Each attempt uses a new private
+directory; `&&` stops the sequence on failure. After either successful method:
+
+```bash
+ls -d README.md runbook linux windows splunk vendor
+```
+
+Keep the entire repository and stay at this root for later commands, not inside
+`runbook`. Archives have no Git metadata: confirm their revision through the
+team's approved release/commit process, not `git rev-parse`. If GitHub is blocked,
+follow [offline transfer and integrity checks](README.md#8-download-and-offline-transfer-precautions).
+Do not disable TLS checks, pipe downloads into Bash, or update a pending firewall run.
+
 ## 1. Mission and facts to fill in
 
 Keep the existing store, its required content, authentication and backend

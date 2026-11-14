@@ -2,6 +2,51 @@
 
 [All machines](README.md) | [Generic workstation guide](../docs/services/windows-workstation.md)
 
+## Get the toolkit onto this machine
+
+Use **64-bit PowerShell** and an approved GitHub download path/version. These
+steps fetch current `main` into a fresh user-owned directory; they do not run
+hardening and do not require elevation. Elevate later only where instructed.
+
+**No Git required: curl.exe and ZIP extraction**
+
+Use `curl.exe`, not the Windows PowerShell `curl` alias. If curl.exe is absent,
+replace its download command **and** the `$LASTEXITCODE` check below with the
+Invoke-WebRequest alternative shown afterward. Stop on any error.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol =
+    [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$Stage = Join-Path $env:USERPROFILE ("CCDC\Helperbro-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $Stage -Force | Out-Null
+$Zip = Join-Path $Stage 'helperbro.zip'
+
+curl.exe --fail --location --show-error `
+    'https://github.com/babasveeramallu/helperbro/archive/refs/heads/main.zip' `
+    --output $Zip
+if ($LASTEXITCODE -ne 0) { throw 'Download failed; stopping.' }
+
+Expand-Archive -LiteralPath $Zip -DestinationPath $Stage
+Set-Location -LiteralPath (Join-Path $Stage 'helperbro-main')
+Get-Item README.md,runbook,windows,linux,splunk,vendor
+```
+
+**Alternative download command**, using the same `$Zip` variable in that block:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing `
+    -Uri 'https://github.com/babasveeramallu/helperbro/archive/refs/heads/main.zip' `
+    -OutFile $Zip -ErrorAction Stop
+```
+
+Choose one downloader before running the block. Keep all extracted files and run
+later examples from this repository root, not `runbook`. ZIPs have no Git
+metadata: confirm the revision through the team's approved release/commit
+process. For blocked downloads use [offline transfer and integrity checks](README.md#8-download-and-offline-transfer-precautions).
+Do not weaken execution/certificate policy, pipe downloads into `iex`, or
+replace a toolkit copy during a pending firewall run.
+
 ## 1. Mission and defaults
 
 The documented packet default is **Windows 11 with DHCP**, not a verified live

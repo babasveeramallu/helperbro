@@ -38,8 +38,9 @@ scoring-source allowlists. A role label is not necessarily a hostname.
 1. Assign an operator and a console/recovery contact to each host.
 2. Record current scoring, service transactions, hostnames, addresses, DNS,
    routes, account dependencies and clock/timezone. Identify existing failures.
-3. Use an approved copy of the complete repository. Follow
-   [toolkit staging](../docs/services/README.md#obtain-the-toolkit-when-downloads-are-permitted);
+3. Use an approved copy of the complete repository. Each machine guide starts
+   with its Git/curl/ZIP staging steps. For blocked downloads follow
+   [offline transfer precautions](#8-download-and-offline-transfer-precautions);
    record the approved commit with `git rev-parse HEAD` where Git is available.
    Do not update the copy in the middle of a pending firewall run.
 4. Keep a working session and console access. Verify an allowed recovery method;
@@ -272,3 +273,46 @@ credential-update process.
 For confirmed incidents use [incident report](../templates/incident-report.md);
 for recovery planning use [disaster recovery](../templates/disaster-recovery.md).
 An unknown listener, young file or alert is a lead, not proof of compromise.
+
+## 8. Download and offline transfer precautions
+
+Each machine guide begins with copy/paste staging commands. Download/extraction
+does not install the target application or authorize hardening. Examples use
+moving `main`, not a pinned release; agree on the approved revision before
+deploying across machines. Git clones contain a commit ID; downloaded archives
+do not include `.git` and cannot use `git pull` or `git rev-parse`.
+
+If Git is absent, use the curl/archive instructions rather than installing
+packages without approval. If GitHub itself is blocked, curl is not a network
+workaround. Use this approved offline process instead:
+
+1. On an authorized connected workstation, obtain the approved repository
+   archive from GitHub: ZIP for Windows, or tar.gz for Linux with tar/gzip.
+2. Record its approved source/revision, filename and SHA-256. Examples below
+   assume the same ZIP is being transferred; substitute the actual filename.
+
+   ```powershell
+   Get-FileHash -LiteralPath '.\helperbro-main.zip' -Algorithm SHA256
+   ```
+
+   ```bash
+   sha256sum helperbro-main.zip
+   ```
+
+3. Transfer the whole archive using approved SCP/SFTP, removable media or the
+   competition's file-transfer mechanism. Do not embed credentials in commands.
+4. Compute SHA-256 on the destination and compare the complete digest with the
+   source through a trusted channel. Stop on a mismatch. Matching hashes prove
+   transfer consistency, not that an untrusted source is authentic.
+5. Extract into a fresh private directory with the platform's archive tool.
+   Keep the complete repository, including `vendor` and library/config files.
+   Linux ZIP extraction requires an available unzip tool; the documented tar.gz
+   download avoids that dependency. Missing tools require an approved method,
+   not a silent fallback or unapproved installation.
+6. Confirm the repository root contains `README.md`, `runbook`, `linux`,
+   `windows`, `splunk` and `vendor`. Run later examples from that root.
+
+Do not disable TLS certificate checks, change firewall/network policy merely to
+download, or pipe remote content into Bash/PowerShell. Never replace a toolkit
+copy while a run's firewall rollback is pending. Keep protected reports and
+credential recovery files separate from the source download.

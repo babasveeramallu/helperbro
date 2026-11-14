@@ -62,7 +62,8 @@ elseif (-not (Get-Command Get-LocalUser -ErrorAction SilentlyContinue)) {
 }
 else {
     try {
-        $me =  [Security.Principal.WindowsIdentity]::GetCurrent().Name.Split('\')[-1]
+        # Compare by SID: a domain account can share its name with a different local account.
+        $meSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         $admin = Get-LocalUser | Where-Object { $_.SID.Value -match '-500$' } | Select-Object -First 1
         $planned = New-Object System.Collections.Generic.List[object]
 
@@ -71,7 +72,7 @@ else {
             if (-not ($RenameAdministrator -or $RotateAdministrator)) {
                 Write-Log INFO "Built-in Administrator '$($admin.Name)' left unchanged (use -RenameAdministrator or -RotateAdministrator)."
             }
-            elseif ($admin.Name -eq $me) { Write-Log SKIP "Built-in Administrator '$($admin.Name)' is the current user; not renamed or rotated (would lock you out of this session)." }
+            elseif ($admin.SID.Value -eq $meSid) { Write-Log SKIP "Built-in Administrator '$($admin.Name)' is the current user; not renamed or rotated (would lock you out of this session)." }
             elseif ($inUse) { Write-Log SKIP "Built-in Administrator '$($admin.Name)' is used by $inUse; not renamed or rotated (SLA protection)." }
             else {
                 if ($RenameAdministrator) {
@@ -79,7 +80,10 @@ else {
                         -IsCompliant { (Get-LocalUser | Where-Object { $_.SID.Value -match '-500$' }).Name -ceq $NewAdminName } `
                         -Apply { Rename-LocalUser -InputObject (Get-LocalUser | Where-Object { $_.SID.Value -match '-500$' }) -NewName $NewAdminName }
                 }
-                if ($RotateAdministrator -and ($ExcludeUsers -notcontains $admin.Name) -and ($ExcludeUsers -notcontains $NewAdminName)) {
+                # The new name only matters for exclusions when the account is actually being renamed.
+                $excluded = ($ExcludeUsers -contains $admin.Name) -or ($RenameAdministrator -and $ExcludeUsers -contains $NewAdminName)
+                if ($RotateAdministrator -and $excluded) { Write-Log SKIP "Excluded from rotation: built-in Administrator '$($admin.Name)'" }
+                elseif ($RotateAdministrator) {
                     $planned.Add([pscustomobject]@{ Sid = $admin.SID.Value; Role = 'BuiltInAdministrator' })
                 }
             }
@@ -98,7 +102,7 @@ else {
         if ($RotateAllEnabledUsers) {
             foreach ($u in (Get-LocalUser | Where-Object { $_.Enabled -and $_.SID.Value -notmatch '-(500|501|503|504)$' })) {
                 if ($ExcludeUsers -contains $u.Name) { Write-Log SKIP "Excluded from rotation: $($u.Name)"; continue }
-                if ($u.Name -eq $me) { Write-Log SKIP "Current user '$($u.Name)' not rotated (would lock you out of this session)."; continue }
+                if ($u.SID.Value -eq $meSid) { Write-Log SKIP "Current user '$($u.Name)' not rotated (would lock you out of this session)."; continue }
                 $inUse = Test-CCDCAccountInUse -Name $u.Name
                 if ($inUse) { Write-Log SKIP "Not rotated: $($u.Name) is used by $inUse."; continue }
                 $planned.Add([pscustomobject]@{ Sid = $u.SID.Value; Role = 'LocalUser' })

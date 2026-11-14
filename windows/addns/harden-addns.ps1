@@ -18,11 +18,15 @@ $lib = Join-Path $PSScriptRoot '..\lib'
 try {
     Initialize-CCDCRole -Role 'addns' -ReportDirectory $ReportDirectory
     $write = $SecureDnsZones -or $HardenDcAuth -or $DisableSpooler -or $EnableAuditPolicy
-    if ($script:Computer.DomainRole -lt 4) { Write-Log FLAG 'This host is not a domain controller (DomainRole<4); AD checks will be skipped.' }
+    $isDc = $script:Computer.DomainRole -ge 4
+    if (-not $isDc) { Write-Log FLAG 'This host is not a domain controller (DomainRole<4); AD checks will be skipped.' }
+    if ($write -and $Apply) {
+        if (-not $isDc) { throw 'Refusing to apply DC-specific hardening on a non-domain-controller.' }
+        Assert-CCDCAdmin
+    }
     Get-CCDCBaseline -IsDomainJoined ([bool]$script:Computer.PartOfDomain) -Path (Join-Path $ReportDirectory "addns-baseline-before-$($script:Stamp).json")
     Show-CCDCCommonHostAudit
 
-    $isDc = $script:Computer.DomainRole -ge 4
     $domain = $null
     if ($isDc -and (Get-Module -ListAvailable -Name ActiveDirectory)) {
         Import-Module ActiveDirectory -ErrorAction Stop
@@ -94,8 +98,6 @@ try {
         if ($EnableAuditPolicy) { Write-Log FLAG 'PLAN ONLY: would enable success+failure auditing incl. directory service and Kerberos events.' }
         Write-Log INFO 'Plan-only complete; add -Apply. Take a VM snapshot and a system-state backup first (restore points are not supported on Server).'
     } elseif ($write -and $Apply) {
-        if (-not $isDc) { throw 'Refusing to apply DC-specific hardening on a non-domain-controller.' }
-        Assert-CCDCAdmin
         if ($HardenDcAuth) {
             if ($PSCmdlet.ShouldProcess('Registry', 'LDAP signing, Zerologon enforcement, anonymous restriction, NTLMv2-only')) {
                 Set-CCDCRegistryValue -Path $ntds -Name LDAPServerIntegrity -Value 2

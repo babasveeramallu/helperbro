@@ -1,6 +1,6 @@
-# Windows AD and DNS machine
+# Windows AD/DNS runbook
 
-[All machines](../README.md) | [AD service guide](../../services/ad-dns.md)
+[All machines](README.md) | [AD service guide](../docs/services/ad-dns.md)
 
 ## 1. Role, defaults and stop conditions
 
@@ -65,15 +65,15 @@ establishing ownership and preserving evidence.
 
 | Tool | What it does on this machine |
 |---|---|
-| [first-hour.ps1](../../../windows/first-hour.ps1) | Common host/account/service/task/startup/WMI baseline; optional selected policy, firewall, protocol, USB, signing, Spooler and Sysmon work |
-| [harden-addns.ps1](../../../windows/addns/harden-addns.ps1) | Audit domain/forest, privileged groups, risky account attributes, GPO metadata, SYSVOL scripts, DNS zones, LDAP/Netlogon settings and Spooler |
-| [Set-WindowsForwarder.ps1](../../../splunk/Set-WindowsForwarder.ps1) | AD event forwarding to the verified receiver; no AD/WinRM/firewall policy change |
-| [Set-PacketFirewall.ps1](../../../windows/Set-PacketFirewall.ps1) | Additive dependency rules and profile defaults with independent rollback |
-| [harden-ad.ps1](../../../windows/lib/harden-ad.ps1) | Separate standalone LDAP/Kerberos hardener, **not an alias** of the role script |
-| [auto-harden.ps1](../../../windows/auto-harden.ps1) | Broad multi-category wrapper; not the normal DC procedure here |
+| [first-hour.ps1](../windows/first-hour.ps1) | Common host/account/service/task/startup/WMI baseline; optional selected policy, firewall, protocol, USB, signing, Spooler and Sysmon work |
+| [harden-addns.ps1](../windows/addns/harden-addns.ps1) | Audit domain/forest, privileged groups, risky account attributes, GPO metadata, SYSVOL scripts, DNS zones, LDAP/Netlogon settings and Spooler |
+| [Set-WindowsForwarder.ps1](../splunk/Set-WindowsForwarder.ps1) | AD event forwarding to the verified receiver; no AD/WinRM/firewall policy change |
+| [Set-PacketFirewall.ps1](../windows/Set-PacketFirewall.ps1) | Additive dependency rules and profile defaults with independent rollback |
+| [harden-ad.ps1](../windows/lib/harden-ad.ps1) | Separate standalone LDAP/Kerberos hardener, **not an alias** of the role script |
+| [auto-harden.ps1](../windows/auto-harden.ps1) | Broad multi-category wrapper; not the normal DC procedure here |
 
 Most library files define helpers; do not execute them directly. The five
-[standalone exceptions](../README.md#5-shared-script-map) apply by default unless
+[standalone exceptions](README.md#5-shared-script-map) apply by default unless
 `-AuditOnly` is supplied. The separate local-password helper refuses DCs; local
 rotation is not a domain-account recovery plan.
 
@@ -89,7 +89,7 @@ $Port = 9997
 ```
 
 Audit does not install UF. If missing, stage an approved, vendor-signed x64 MSI
-and follow the [interactive installation procedure](../../../splunk/PLAYBOOK.md#5-windows-forwarder-procedure).
+and follow the [interactive installation procedure](../splunk/PLAYBOOK.md#5-windows-forwarder-procedure).
 Use a unique UF-local administrator credential, not domain/scoring credentials;
 verify its service identity can read Security and Directory Service.
 
@@ -122,7 +122,7 @@ $Marker
 
 Find that exact marker in `index=wineventlog sourcetype=XmlWinEventLog*`
 with `earliest=-10m latest=now`, tied to this actual hostname. Use the
-[central verification queries](../splunk-debian/README.md#7-verification-three-independent-levels).
+[central verification queries](splunkreadme.md#7-verification-three-independent-levels).
 
 ## 5. Optional AD/DNS hardening: one category per change
 
@@ -221,7 +221,7 @@ Run-specific rollback removes only its own rules and restores supported changed
 local profile fields. Concurrent conflicts and original `NotConfigured` fields
 can leave recovery incomplete and Pending; keep console access and investigate.
 Older saved runs can still perform whole-policy imports.
-Read [recovery limits](../../../windows/DEFENSE-PLAYBOOK.md#6-firewall-apply-verify-then-commit).
+Read [recovery limits](../windows/DEFENSE-PLAYBOOK.md#6-firewall-apply-verify-then-commit).
 Existing broad/GPO rules remain; this is not a strict allowlist.
 
 ## 7. Functional validation and recovery

@@ -1,6 +1,6 @@
-# Debian Splunk machine
+# Debian Splunk runbook
 
-[All machines](../README.md) | [Full forwarding playbook](../../../splunk/PLAYBOOK.md)
+[All machines](README.md) | [Full forwarding playbook](../splunk/PLAYBOOK.md)
 
 ## 1. Role, defaults and protected services
 
@@ -64,12 +64,12 @@ delete apps or upgrade Enterprise automatically.
 
 | File | Actual behavior |
 |---|---|
-| [setup-debian-receiver.sh](../../../splunk/setup-debian-receiver.sh) | Audit/configure an **existing running** Splunk Enterprise installation; manage a dedicated receiver app |
-| [mssql-props.conf](../../../splunk/mssql-props.conf) | SQL text ERRORLOG encoding, record boundaries and timestamp parsing; copied by setup |
-| [Set-WindowsForwarder.ps1](../../../splunk/Set-WindowsForwarder.ps1) | Runs on the three Windows senders, **not** on Debian |
-| [WindowsForwarder.Common.ps1](../../../splunk/WindowsForwarder.Common.ps1) | Forwarder rendering/discovery helpers; not a Debian entry point |
-| [Linux first-hour](../../../linux/first-hour.sh) | Optional host audit/selected hardening; does not configure Splunk or Linux log forwarding |
-| [generate-configs.py](../../../splunk/generate-configs.py) | Older renderer requiring `config/splunk.json` in the repository's **parent** workspace; writes there under `generated/splunk`; not deployment |
+| [setup-debian-receiver.sh](../splunk/setup-debian-receiver.sh) | Audit/configure an **existing running** Splunk Enterprise installation; manage a dedicated receiver app |
+| [mssql-props.conf](../splunk/mssql-props.conf) | SQL text ERRORLOG encoding, record boundaries and timestamp parsing; copied by setup |
+| [Set-WindowsForwarder.ps1](../splunk/Set-WindowsForwarder.ps1) | Runs on the three Windows senders, **not** on Debian |
+| [WindowsForwarder.Common.ps1](../splunk/WindowsForwarder.Common.ps1) | Forwarder rendering/discovery helpers; not a Debian entry point |
+| [Linux first-hour](../linux/first-hour.sh) | Optional host audit/selected hardening; does not configure Splunk or Linux log forwarding |
+| [generate-configs.py](../splunk/generate-configs.py) | Older renderer requiring `config/splunk.json` in the repository's **parent** workspace; writes there under `generated/splunk`; not deployment |
 
 Do not layer the older generator's outputs over the dedicated receiver/forwarder
 apps. They use different configuration assumptions and may duplicate collection.
@@ -149,8 +149,8 @@ size retention, configure Web/8089, rotate accounts or modify any firewall.
 ## 5. Windows senders and data semantics
 
 After receiver readiness, follow each Windows README:
-[AD](../ad-windows/README.md), [MSSQL](../mssql-windows/README.md),
-[workstation](../workstation-windows/README.md).
+[AD](addnsreadme.md), [MSSQL](mssqlreadme.md),
+[workstation](windowswkstreadme.md).
 
 | Destination index | Data from the managed Windows app |
 |---|---|
@@ -180,7 +180,7 @@ text to it. For approved raw TCP syslog:
    Windows receiver script creates missing `wineventlog`, `sysmon`, `mssql`
    definitions only; it does not provision an arbitrary Linux index.
 4. Coordinate network policy for actual senders and selected port separately.
-5. Follow [Linux sender setup](../README.md#6-linux-syslog-is-a-separate-optional-manual-setup)
+5. Follow [Linux sender setup](README.md#6-linux-syslog-is-a-separate-optional-manual-setup)
    and search a newly generated marker from each sender.
 
 Debian may have only journald rather than `/var/log/auth.log`. Inspect existing
@@ -282,7 +282,7 @@ configuration with correct ownership, validate effective settings and restart
 only Splunk in an approved window. If the app was new, remove only its identified
 managed configuration after preserving it and checking for later changes.
 Do not delete `etc/apps`, index directories or the whole installation.
-See [detailed recovery](../../../splunk/PLAYBOOK.md#9-rollback-reruns-and-recovery-limits).
+See [detailed recovery](../splunk/PLAYBOOK.md#9-rollback-reruns-and-recovery-limits).
 
 ## 9. Toolkit checks and handoff
 

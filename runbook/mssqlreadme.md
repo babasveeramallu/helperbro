@@ -1,6 +1,6 @@
-# Windows MSSQL, SMB/SOP and RDP machine
+# Windows MSSQL, SMB/SOP and RDP runbook
 
-[All machines](../README.md) | [SQL service guide](../../services/mssql.md)
+[All machines](README.md) | [SQL service guide](../docs/services/mssql.md)
 
 ## 1. Mission and live inventory
 
@@ -65,12 +65,12 @@ contacts. A filesystem copy of a running database is not a validated SQL backup.
 
 | Script | Actual behavior and limits |
 |---|---|
-| [first-hour.ps1](../../../windows/first-hour.ps1) | Common audit and selected host controls; not a SQL hardening/backup script |
-| [Set-WindowsForwarder.ps1](../../../splunk/Set-WindowsForwarder.ps1), role `MSSQL` | Windows channels and selected SQL text ERRORLOG monitoring |
-| [Set-PacketFirewall.ps1](../../../windows/Set-PacketFirewall.ps1), role `MSSQL` | Additive SQL/SMB/RDP dependencies with timed rollback |
-| [Invoke-ServiceProbe.ps1](../../../windows/Invoke-ServiceProbe.ps1) | One TCP/HTTP(S)/DNS/banner check; no SQL authentication or SMB content test |
-| [HostFirewall.ps1](../../../windows/lib/HostFirewall.ps1) | Helper invoked by first-hour; different discovered-service firewall, no independent commit timer |
-| [auto-harden.ps1](../../../windows/auto-harden.ps1) | Broad common/role baseline; has no dedicated SQL role hardener |
+| [first-hour.ps1](../windows/first-hour.ps1) | Common audit and selected host controls; not a SQL hardening/backup script |
+| [Set-WindowsForwarder.ps1](../splunk/Set-WindowsForwarder.ps1), role `MSSQL` | Windows channels and selected SQL text ERRORLOG monitoring |
+| [Set-PacketFirewall.ps1](../windows/Set-PacketFirewall.ps1), role `MSSQL` | Additive SQL/SMB/RDP dependencies with timed rollback |
+| [Invoke-ServiceProbe.ps1](../windows/Invoke-ServiceProbe.ps1) | One TCP/HTTP(S)/DNS/banner check; no SQL authentication or SMB content test |
+| [HostFirewall.ps1](../windows/lib/HostFirewall.ps1) | Helper invoked by first-hour; different discovered-service firewall, no independent commit timer |
+| [auto-harden.ps1](../windows/auto-harden.ps1) | Broad common/role baseline; has no dedicated SQL role hardener |
 
 A server without DC/IIS roles can receive the wrapper's workstation-baseline
 fallback. That does not make it an approved SQL configuration procedure.
@@ -88,7 +88,7 @@ $Port = 9997
 
 Audit writes no script backup/report and does not install missing UF. Apply may
 launch a staged vendor-signed x64 MSI interactively; follow
-[installation and service-identity requirements](../../../splunk/PLAYBOOK.md#5-windows-forwarder-procedure).
+[installation and service-identity requirements](../splunk/PLAYBOOK.md#5-windows-forwarder-procedure).
 The chosen service account must read Security and the SQL log files. The script
 does not grant SQL file ACLs or change the service identity.
 
@@ -219,7 +219,7 @@ merely because rule creation succeeded. The independent SYSTEM watchdog attempts
 scoped recovery if uncommitted. Same-field conflicts and original local
 `NotConfigured` values can prevent full profile restoration and leave Pending.
 Keep the run files/task and console while investigating.
-See [complete limits](../../../windows/DEFENSE-PLAYBOOK.md#6-firewall-apply-verify-then-commit).
+See [complete limits](../windows/DEFENSE-PLAYBOOK.md#6-firewall-apply-verify-then-commit).
 
 Do not combine this with `-EnforceHostFirewall` or the standalone legacy firewall.
 Do not use management/system scoping to narrow scored SQL/SMB/RDP to team-only

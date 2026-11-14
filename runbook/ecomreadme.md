@@ -1,6 +1,6 @@
-# Rocky Linux e-commerce machine
+# Rocky Linux e-commerce runbook
 
-[All machines](../README.md) | [Generic web guide](../../services/web.md)
+[All machines](README.md) | [Generic web guide](../docs/services/web.md)
 
 ## 1. Mission and facts to fill in
 
@@ -69,10 +69,10 @@ Do not flush nftables or disable SELinux to make the application work.
 
 | Script | What it does here | What it does not do |
 |---|---|---|
-| [Linux first-hour](../../../linux/first-hour.sh) | Account/key metadata, cron/timer inventory; optional reviewed host changes | Install or harden the store, patch the app, remove web shells automatically |
-| [Service probe](../../../linux/service-probe.sh) | Check one authorized HTTP(S) path and expected text | Authenticate a shopper, validate checkout/database state or prove scoring |
-| [Standalone firewall](../../../linux/apply-firewall.sh) | JSON-driven timed nftables input/output policy | Know the store's database, DNS, payment, update or container dependencies |
-| [PAM helper](../../../linux/pam_policy.py) | Debian-style helper used elsewhere | Support automatic Rocky PAM edits |
+| [Linux first-hour](../linux/first-hour.sh) | Account/key metadata, cron/timer inventory; optional reviewed host changes | Install or harden the store, patch the app, remove web shells automatically |
+| [Service probe](../linux/service-probe.sh) | Check one authorized HTTP(S) path and expected text | Authenticate a shopper, validate checkout/database state or prove scoring |
+| [Standalone firewall](../linux/apply-firewall.sh) | JSON-driven timed nftables input/output policy | Know the store's database, DNS, payment, update or container dependencies |
+| [PAM helper](../linux/pam_policy.py) | Debian-style helper used elsewhere | Support automatic Rocky PAM edits |
 
 Windows IIS hardening scripts are **not applicable**. Database, web vhost,
 certificate, SELinux context and application changes need product-specific
@@ -155,7 +155,7 @@ The script refuses to reuse an existing `ccdc_host` table.
 
 The separate JSON firewall adds **outbound default drop** as well as input
 filtering. Do not use its example JSON unchanged. See
-[standalone firewall behavior](../../../README.md#standalone-linux-firewall-script)
+[standalone firewall behavior](../README.md#standalone-linux-firewall-script)
 for every required field, timer and container-egress caveat.
 
 ## 5. Verify the store, not just its port
@@ -188,7 +188,7 @@ solely to generate verification traffic.
 
 ## 6. Logging and investigation
 
-Follow [optional Linux syslog](../README.md#6-linux-syslog-is-a-separate-optional-manual-setup)
+Follow [optional Linux syslog](README.md#6-linux-syslog-is-a-separate-optional-manual-setup)
 only after the Debian operator confirms the input and destination index.
 Ordinary syslog forwarding does not automatically monitor application files.
 Identify the actual web access/error logs, reverse-proxy logs and application

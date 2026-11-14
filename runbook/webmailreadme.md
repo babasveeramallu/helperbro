@@ -1,6 +1,6 @@
-# Ubuntu Server email / webmail machine
+# Ubuntu Server email / webmail runbook
 
-[All machines](../README.md) | [Generic email guide](../../services/email.md)
+[All machines](README.md) | [Generic email guide](../docs/services/email.md)
 
 ## 1. Mission and inventory
 
@@ -75,10 +75,10 @@ own supported commands. Do not delete/flush a queue or mailbox to fix disk space
 
 | Script | Relevant behavior | Limit |
 |---|---|---|
-| [first-hour.sh](../../../linux/first-hour.sh) | Account/key metadata, cron/timer inventory; explicitly selected changes | Does not understand mailbox dependencies, MTA relay policy or spam filtering |
-| [pam_policy.py](../../../linux/pam_policy.py) | Recognized Debian-style PAM policy, called by first-hour | Can break mail authentication; not a mail-account manager |
-| [service-probe.sh](../../../linux/service-probe.sh) | Single-target TCP/HTTP(S)/DNS and plaintext mail-banner checks | Does not authenticate, send mail or read a mailbox |
-| [apply-firewall.sh](../../../linux/apply-firewall.sh) | Reviewed JSON input/output firewall with timer | Incomplete output policy can block mail delivery, DNS and logging |
+| [first-hour.sh](../linux/first-hour.sh) | Account/key metadata, cron/timer inventory; explicitly selected changes | Does not understand mailbox dependencies, MTA relay policy or spam filtering |
+| [pam_policy.py](../linux/pam_policy.py) | Recognized Debian-style PAM policy, called by first-hour | Can break mail authentication; not a mail-account manager |
+| [service-probe.sh](../linux/service-probe.sh) | Single-target TCP/HTTP(S)/DNS and plaintext mail-banner checks | Does not authenticate, send mail or read a mailbox |
+| [apply-firewall.sh](../linux/apply-firewall.sh) | Reviewed JSON input/output firewall with timer | Incomplete output policy can block mail delivery, DNS and logging |
 
 From the repository root:
 
@@ -211,7 +211,7 @@ limited pass; exit 1 is failure and 2 is unknown/invalid.
 
 ## 7. Logs, troubleshooting and recovery
 
-Follow the [manual Linux syslog procedure](../README.md#6-linux-syslog-is-a-separate-optional-manual-setup)
+Follow the [manual Linux syslog procedure](README.md#6-linux-syslog-is-a-separate-optional-manual-setup)
 after the receiver exists. First-hour does not deploy a Linux forwarder.
 Verify whether mail writes to journald, `/var/log/mail.log`, a product log or
 container stdout; file paths are not universal.

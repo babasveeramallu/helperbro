@@ -1,6 +1,6 @@
-# Windows workstation
+# Windows workstation runbook
 
-[All machines](../README.md) | [Generic workstation guide](../../services/windows-workstation.md)
+[All machines](README.md) | [Generic workstation guide](../docs/services/windows-workstation.md)
 
 ## 1. Mission and defaults
 
@@ -50,17 +50,17 @@ before applying changes. Treat unavailable modules and denied reads as gaps.
 
 | Entry point | What it actually does |
 |---|---|
-| [harden-workstation.ps1](../../../windows/workstation/harden-workstation.ps1) | Workstation-specific inventory plus selected credential/logging/AutoRun/Defender/audit categories |
-| [first-hour.ps1](../../../windows/first-hour.ps1) | Broad host/account/task/startup/service/WMI inventory and optional selected common changes |
-| [Set-WindowsForwarder.ps1](../../../splunk/Set-WindowsForwarder.ps1) | UF app, channel and service configuration; `Wkst` adds available device channels |
-| [Set-PacketFirewall.ps1](../../../windows/Set-PacketFirewall.ps1) and [recovery](../../../windows/Invoke-PacketFirewallRecovery.ps1) | Additive role baseline and independent apply/verify/commit timer |
-| [Invoke-ServiceProbe.ps1](../../../windows/Invoke-ServiceProbe.ps1) | One authorized TCP/content/DNS/banner test; not full authentication/scoring |
-| [Show-RotatedCredentials.ps1](../../../windows/Show-RotatedCredentials.ps1) | First-hour DPAPI recovery, same account/machine |
-| [Rotate-LocalPasswords.ps1](../../../windows/Rotate-LocalPasswords.ps1) | Separate explicit local rotation with passphrase-encrypted store |
-| [New-DecoyCredentialFile.ps1](../../../windows/New-DecoyCredentialFile.ps1) | Labeled fake credentials only, no password changes or access monitoring |
+| [harden-workstation.ps1](../windows/workstation/harden-workstation.ps1) | Workstation-specific inventory plus selected credential/logging/AutoRun/Defender/audit categories |
+| [first-hour.ps1](../windows/first-hour.ps1) | Broad host/account/task/startup/service/WMI inventory and optional selected common changes |
+| [Set-WindowsForwarder.ps1](../splunk/Set-WindowsForwarder.ps1) | UF app, channel and service configuration; `Wkst` adds available device channels |
+| [Set-PacketFirewall.ps1](../windows/Set-PacketFirewall.ps1) and [recovery](../windows/Invoke-PacketFirewallRecovery.ps1) | Additive role baseline and independent apply/verify/commit timer |
+| [Invoke-ServiceProbe.ps1](../windows/Invoke-ServiceProbe.ps1) | One authorized TCP/content/DNS/banner test; not full authentication/scoring |
+| [Show-RotatedCredentials.ps1](../windows/Show-RotatedCredentials.ps1) | First-hour DPAPI recovery, same account/machine |
+| [Rotate-LocalPasswords.ps1](../windows/Rotate-LocalPasswords.ps1) | Separate explicit local rotation with passphrase-encrypted store |
+| [New-DecoyCredentialFile.ps1](../windows/New-DecoyCredentialFile.ps1) | Labeled fake credentials only, no password changes or access monitoring |
 
-The [auto-hardener](../../../windows/auto-harden.ps1) and five
-[standalone modules](../README.md#5-shared-script-map) have broader/default-apply
+The [auto-hardener](../windows/auto-harden.ps1) and five
+[standalone modules](README.md#5-shared-script-map) have broader/default-apply
 behavior. They are not required to use the role script or forwarder.
 Do not start a canary or create firewall exceptions without explicit approval.
 
@@ -77,7 +77,7 @@ $Port = 9997
 
 Audit does not install missing UF or create its reports. Use the approved x64
 vendor-signed MSI, optional trusted expected hash and
-[interactive installer procedure](../../../splunk/PLAYBOOK.md#5-windows-forwarder-procedure)
+[interactive installer procedure](../splunk/PLAYBOOK.md#5-windows-forwarder-procedure)
 if required. Choose a unique UF-local administrator credential and verify the
 service identity's read access; do not reuse domain/scoring credentials.
 
@@ -110,7 +110,7 @@ $Marker
 ```
 
 Find that exact marker in the actual host's `wineventlog` XML events over the last
-ten minutes using the [receiver queries](../splunk-debian/README.md#7-verification-three-independent-levels).
+ten minutes using the [receiver queries](splunkreadme.md#7-verification-three-independent-levels).
 An active service or connected port is not enough.
 
 ## 5. Workstation role: selected controls, not one giant switch
@@ -216,7 +216,7 @@ SYSTEM rollback task. It attempts scoped rule/profile recovery, not workstation
 policy or UF recovery. Original local `NotConfigured` values and concurrent
 same-field edits can leave recovery incomplete and Pending; keep run files/task
 and console while investigating. Older pending runs may restore a full snapshot.
-See [detailed boundaries](../../../windows/DEFENSE-PLAYBOOK.md#6-firewall-apply-verify-then-commit).
+See [detailed boundaries](../windows/DEFENSE-PLAYBOOK.md#6-firewall-apply-verify-then-commit).
 
 ## 8. Password tools and decoys are optional separate workflows
 
@@ -242,7 +242,7 @@ failures investigated.
 Fake credential files never hold real passwords or install detection. Network
 decoys require approved unused ports and explicit organizer approval; no default
 port is approved by these docs. Read the
-[defense playbook](../../../windows/DEFENSE-PLAYBOOK.md#7-decoys-approval-and-audit)
+[defense playbook](../windows/DEFENSE-PLAYBOOK.md#7-decoys-approval-and-audit)
 before considering them.
 
 ## 9. Troubleshooting and handoff

@@ -1,25 +1,30 @@
-# Seven-machine operator runbooks
+# Machine runbooks
 
-[Repository guide](../../README.md) | [Generic service guides](../services/README.md)
+[Repository guide](../README.md) | [Generic service guides](../docs/services/README.md)
 
 Use the README for the machine in front of you, not every command in this
 directory. These are operating procedures for **existing competition machines**,
 not unattended installers or proof that a live host is secure.
 
+All seven machine guides are directly inside the top-level `runbook` folder,
+with distinct filenames listed below. Open the file for your role; there are no
+nested machine folders to navigate. Command examples still run from the
+repository root, not from this documentation folder.
+
 ## 1. Pick your machine
 
 | Diagram machine | Dedicated README | Documented defaults, NOT live verification |
 |---|---|---|
-| Ecom / Rocky Linux | [Rocky e-commerce](ecommerce-rocky/README.md) | Rocky; version, address and application stack unknown |
-| Email / Ubuntu Server | [Ubuntu email](email-ubuntu/README.md) | Ubuntu Server; version, address and mail stack unknown |
-| Splunk / Debian | [Debian Splunk](splunk-debian/README.md) | Packet: Debian 12, Splunk 10.0.2, `172.20.240.20` |
-| AD / Windows | [Windows AD/DNS](ad-windows/README.md) | Packet: Server 2022, `172.20.240.100` |
-| MSSQL / Windows | [Windows SQL/SMB/RDP](mssql-windows/README.md) | Packet: Server 2019, `172.20.240.120` |
-| Wkst / Ubuntu | [Ubuntu workstation](workstation-ubuntu/README.md) | Ubuntu; version and address unknown; verify DHCP |
-| Wkst / Windows | [Windows workstation](workstation-windows/README.md) | Packet: Windows 11, DHCP |
+| Ecom / Rocky Linux | [ecomreadme.md](ecomreadme.md) | Rocky; version, address and application stack unknown |
+| Email / Ubuntu Server | [webmailreadme.md](webmailreadme.md) | Ubuntu Server; version, address and mail stack unknown |
+| Splunk / Debian | [splunkreadme.md](splunkreadme.md) | Packet: Debian 12, Splunk 10.0.2, `172.20.240.20` |
+| AD / Windows | [addnsreadme.md](addnsreadme.md) | Packet: Server 2022, `172.20.240.100` |
+| MSSQL / Windows | [mssqlreadme.md](mssqlreadme.md) | Packet: Server 2019, `172.20.240.120` |
+| Wkst / Ubuntu | [ubuntuwkstreadme.md](ubuntuwkstreadme.md) | Ubuntu; version and address unknown; verify DHCP |
+| Wkst / Windows | [windowswkstreadme.md](windowswkstreadme.md) | Packet: Windows 11, DHCP |
 
 The supplied diagram establishes the seven roles. The existing
-[Splunk playbook](../../splunk/PLAYBOOK.md#1-mission-topology-and-scoring-boundaries)
+[Splunk playbook](../splunk/PLAYBOOK.md#1-mission-topology-and-scoring-boundaries)
 records packet defaults for four of them. The supplied Splunk reference informed
 the operational checklist, but its passwords, account-removal assumptions,
 version-specific mitigation claims and example addresses are not deployment
@@ -34,7 +39,7 @@ scoring-source allowlists. A role label is not necessarily a hostname.
 2. Record current scoring, service transactions, hostnames, addresses, DNS,
    routes, account dependencies and clock/timezone. Identify existing failures.
 3. Use an approved copy of the complete repository. Follow
-   [toolkit staging](../services/README.md#obtain-the-toolkit-when-downloads-are-permitted);
+   [toolkit staging](../docs/services/README.md#obtain-the-toolkit-when-downloads-are-permitted);
    record the approved commit with `git rev-parse HEAD` where Git is available.
    Do not update the copy in the middle of a pending firewall run.
 4. Keep a working session and console access. Verify an allowed recovery method;
@@ -71,15 +76,15 @@ replace routes, expire passwords or reboot as an undocumented shortcut.
 
 | Entry point | Inspection / preview | What authorizes writes | Audit artifacts |
 |---|---|---|---|
-| [Windows first-hour](../../windows/first-hour.ps1) | No categories = audit; categories plus `-PlanOnly` = preview | Selecting a category **without `-PlanOnly` applies it**; `-Apply` is also accepted | Creates protected log/baseline files |
-| [Windows role scripts](../../windows/workstation/harden-workstation.ps1) | Omit `-Apply`; category switches then describe a plan | `-Apply` plus selected category | Creates protected reports/baselines |
-| [Windows packet firewall](../../windows/Set-PacketFirewall.ps1) | `-AuditOnly` / `-PlanOnly`; elevated | Omit audit and confirm; independent timer required | Audit creates no run directory/task |
-| [Windows forwarder](../../splunk/Set-WindowsForwarder.ps1) | `-AuditOnly` / `-PlanOnly` | Confirm apply and supply `-AllowPlaintext` for this baseline | Audit creates no script backup/report |
-| [Linux first-hour](../../linux/first-hour.sh) | Omit `--apply` | `--apply` plus selected categories; sensitive steps have typed prompts | Writes protected report; firewall preview also writes `/run` rules and checks syntax |
-| [Standalone Linux firewall](../../linux/apply-firewall.sh) | Omit `--apply`; root still required | `--apply`, reviewed JSON and typed prompt | Preview writes `/run/ccdc-first-hour.nft` |
-| [Debian receiver](../../splunk/setup-debian-receiver.sh) | `--audit-only` / `--plan-only` | Omit audit, supply `--allow-plaintext`, type `APPLY` | Audit creates no script reports/backups |
-| [Five standalone Windows modules](../../README.md#standalone-hardening-modules-windowslib) | `-AuditOnly` | Default non-audit mode; typed `APPLY` unless `-Force` | Audit still creates protected reports |
-| [Windows auto-hardener](../../windows/auto-harden.ps1) | `-PlanOnly` | Default invocation applies many categories without individual confirmation | Reports per invoked step |
+| [Windows first-hour](../windows/first-hour.ps1) | No categories = audit; categories plus `-PlanOnly` = preview | Selecting a category **without `-PlanOnly` applies it**; `-Apply` is also accepted | Creates protected log/baseline files |
+| [Windows role scripts](../windows/workstation/harden-workstation.ps1) | Omit `-Apply`; category switches then describe a plan | `-Apply` plus selected category | Creates protected reports/baselines |
+| [Windows packet firewall](../windows/Set-PacketFirewall.ps1) | `-AuditOnly` / `-PlanOnly`; elevated | Omit audit and confirm; independent timer required | Audit creates no run directory/task |
+| [Windows forwarder](../splunk/Set-WindowsForwarder.ps1) | `-AuditOnly` / `-PlanOnly` | Confirm apply and supply `-AllowPlaintext` for this baseline | Audit creates no script backup/report |
+| [Linux first-hour](../linux/first-hour.sh) | Omit `--apply` | `--apply` plus selected categories; sensitive steps have typed prompts | Writes protected report; firewall preview also writes `/run` rules and checks syntax |
+| [Standalone Linux firewall](../linux/apply-firewall.sh) | Omit `--apply`; root still required | `--apply`, reviewed JSON and typed prompt | Preview writes `/run/ccdc-first-hour.nft` |
+| [Debian receiver](../splunk/setup-debian-receiver.sh) | `--audit-only` / `--plan-only` | Omit audit, supply `--allow-plaintext`, type `APPLY` | Audit creates no script reports/backups |
+| [Five standalone Windows modules](../README.md#standalone-hardening-modules-windowslib) | `-AuditOnly` | Default non-audit mode; typed `APPLY` unless `-Force` | Audit still creates protected reports |
+| [Windows auto-hardener](../windows/auto-harden.ps1) | `-PlanOnly` | Default invocation applies many categories without individual confirmation | Reports per invoked step |
 
 `-WhatIf` is not a universal sandbox. Discovery and report creation can still
 occur, and scripts have different confirmation boundaries. Prefer their explicit
@@ -140,10 +145,10 @@ subnet when current rules require general reachability.
 
 | Script | What it actually does | Important boundary |
 |---|---|---|
-| [first-hour.sh](../../linux/first-hour.sh) | Inventory local accounts, key-file metadata/fingerprints, crontabs, timers and Samba; optional policy, firewall, explicit persistence removal and password rotation | Not an application installer or automatic malware remover; some scans can be lengthy |
-| [pam_policy.py](../../linux/pam_policy.py) | Back up/edit recognized Debian PAM files and `login.defs`; verify and attempt restore on failure | Called by first-hour; do not invoke against `/` as an audit |
-| [apply-firewall.sh](../../linux/apply-firewall.sh) | Validate JSON, render/check nftables, optionally add timed input/output policy | Outbound default drop can break DNS, mail, app backends and logging |
-| [service-probe.sh](../../linux/service-probe.sh) | One authorized HTTP(S), DNS, TCP or plaintext banner probe | Does not prove authentication, complete transactions, scoring or ingestion |
+| [first-hour.sh](../linux/first-hour.sh) | Inventory local accounts, key-file metadata/fingerprints, crontabs, timers and Samba; optional policy, firewall, explicit persistence removal and password rotation | Not an application installer or automatic malware remover; some scans can be lengthy |
+| [pam_policy.py](../linux/pam_policy.py) | Back up/edit recognized Debian PAM files and `login.defs`; verify and attempt restore on failure | Called by first-hour; do not invoke against `/` as an audit |
+| [apply-firewall.sh](../linux/apply-firewall.sh) | Validate JSON, render/check nftables, optionally add timed input/output policy | Outbound default drop can break DNS, mail, app backends and logging |
+| [service-probe.sh](../linux/service-probe.sh) | One authorized HTTP(S), DNS, TCP or plaintext banner probe | Does not prove authentication, complete transactions, scoring or ingestion |
 
 First-hour's Linux account-policy category is **not the Windows policy**:
 on supported Debian/Ubuntu layouts it bundles quality/history, five-attempt
@@ -159,27 +164,27 @@ scoring, service and recovery accounts and use an approved secret store.
 
 | Script/group | Purpose and caveat |
 |---|---|
-| [first-hour.ps1](../../windows/first-hour.ps1) | General inventory and individually selected categories; account policy on a domain member targets the **default domain password policy**, not just the local host |
-| [harden-addns.ps1](../../windows/addns/harden-addns.ps1) | AD/DNS inventory and selected DNS/authentication/Spooler/audit changes; source target is Server 2019, packet DC is 2022 |
-| [harden-workstation.ps1](../../windows/workstation/harden-workstation.ps1) | Credential protection, PowerShell logging, AutoRun, Defender and audit categories for Windows workstation |
-| [Set-PacketFirewall.ps1](../../windows/Set-PacketFirewall.ps1) and [recovery](../../windows/Invoke-PacketFirewallRecovery.ps1) | Additive role firewall with apply/verify/commit timer; not a strict allowlist |
-| [Set-WindowsForwarder.ps1](../../splunk/Set-WindowsForwarder.ps1) | Configure UF event subscriptions and MSSQL text logs; does not configure complete source auditing |
-| [Show-RotatedCredentials.ps1](../../windows/Show-RotatedCredentials.ps1) | Recover first-hour DPAPI records using the same account/machine; protect displayed secrets |
-| [Rotate-LocalPasswords.ps1](../../windows/Rotate-LocalPasswords.ps1) | Separate explicitly selected local-account rotation and passphrase-encrypted store; refuses DCs; dependencies are the operator's responsibility |
-| [New-DecoyCredentialFile.ps1](../../windows/New-DecoyCredentialFile.ps1) | Write labeled fake values only; not password recovery and not access monitoring |
-| [Start-WindowsDecoy.ps1](../../windows/Start-WindowsDecoy.ps1) and [cleanup](../../windows/Invoke-DecoyCleanup.ps1) | Approved temporary metadata-only canaries, no default ports; see [defense playbook](../../windows/DEFENSE-PLAYBOOK.md) |
-| [Invoke-ServiceProbe.ps1](../../windows/Invoke-ServiceProbe.ps1) | Single-target checks with the same functional limits as the Linux probe |
-| [auto-harden.ps1](../../windows/auto-harden.ps1) | Broad role-detecting wrapper; continues after child failures; not the default procedure for these runbooks |
+| [first-hour.ps1](../windows/first-hour.ps1) | General inventory and individually selected categories; account policy on a domain member targets the **default domain password policy**, not just the local host |
+| [harden-addns.ps1](../windows/addns/harden-addns.ps1) | AD/DNS inventory and selected DNS/authentication/Spooler/audit changes; source target is Server 2019, packet DC is 2022 |
+| [harden-workstation.ps1](../windows/workstation/harden-workstation.ps1) | Credential protection, PowerShell logging, AutoRun, Defender and audit categories for Windows workstation |
+| [Set-PacketFirewall.ps1](../windows/Set-PacketFirewall.ps1) and [recovery](../windows/Invoke-PacketFirewallRecovery.ps1) | Additive role firewall with apply/verify/commit timer; not a strict allowlist |
+| [Set-WindowsForwarder.ps1](../splunk/Set-WindowsForwarder.ps1) | Configure UF event subscriptions and MSSQL text logs; does not configure complete source auditing |
+| [Show-RotatedCredentials.ps1](../windows/Show-RotatedCredentials.ps1) | Recover first-hour DPAPI records using the same account/machine; protect displayed secrets |
+| [Rotate-LocalPasswords.ps1](../windows/Rotate-LocalPasswords.ps1) | Separate explicitly selected local-account rotation and passphrase-encrypted store; refuses DCs; dependencies are the operator's responsibility |
+| [New-DecoyCredentialFile.ps1](../windows/New-DecoyCredentialFile.ps1) | Write labeled fake values only; not password recovery and not access monitoring |
+| [Start-WindowsDecoy.ps1](../windows/Start-WindowsDecoy.ps1) and [cleanup](../windows/Invoke-DecoyCleanup.ps1) | Approved temporary metadata-only canaries, no default ports; see [defense playbook](../windows/DEFENSE-PLAYBOOK.md) |
+| [Invoke-ServiceProbe.ps1](../windows/Invoke-ServiceProbe.ps1) | Single-target checks with the same functional limits as the Linux probe |
+| [auto-harden.ps1](../windows/auto-harden.ps1) | Broad role-detecting wrapper; continues after child failures; not the default procedure for these runbooks |
 
 The five separately executable modules under `windows/lib` are:
 
 | Module | What non-audit mode can change |
 |---|---|
-| [harden-credentials.ps1](../../windows/lib/harden-credentials.ps1) | Credential/UAC/legacy PowerShell/Defender settings; Guest disabling; explicitly opted-in Administrator rename/rotation and selected bulk rotation |
-| [disable-legacy-protocols.ps1](../../windows/lib/disable-legacy-protocols.ps1) | Legacy protocols **and firewall**, including scoped management; not interchangeable with packet firewall |
-| [harden-ad.ps1](../../windows/lib/harden-ad.ps1) | LDAP signing/channel binding and Kerberos encryption; optional disruptive `krbtgt` reset |
-| [audit-windows-persistence.ps1](../../windows/lib/audit-windows-persistence.ps1) | Persistence inventory **plus logging/transcription changes**; the filename does not make default mode read-only |
-| [apply-gpo-baselines.ps1](../../windows/lib/apply-gpo-baselines.ps1) | LGPO import and Defender ASR settings; requires approved backup/tooling and compatibility review |
+| [harden-credentials.ps1](../windows/lib/harden-credentials.ps1) | Credential/UAC/legacy PowerShell/Defender settings; Guest disabling; explicitly opted-in Administrator rename/rotation and selected bulk rotation |
+| [disable-legacy-protocols.ps1](../windows/lib/disable-legacy-protocols.ps1) | Legacy protocols **and firewall**, including scoped management; not interchangeable with packet firewall |
+| [harden-ad.ps1](../windows/lib/harden-ad.ps1) | LDAP signing/channel binding and Kerberos encryption; optional disruptive `krbtgt` reset |
+| [audit-windows-persistence.ps1](../windows/lib/audit-windows-persistence.ps1) | Persistence inventory **plus logging/transcription changes**; the filename does not make default mode read-only |
+| [apply-gpo-baselines.ps1](../windows/lib/apply-gpo-baselines.ps1) | LGPO import and Defender ASR settings; requires approved backup/tooling and compatibility review |
 
 Other `windows/lib` files provide reporting, baselines, policy, protocol,
 firewall, credential-store, Sysinternals, restore-point, USB and decoy helpers.
@@ -197,7 +202,7 @@ the same logs twice.
 For an approved **plaintext TCP syslog** path only:
 
 1. On Splunk, create/verify the chosen raw TCP input, source type `syslog`, and
-   actual destination index. See the [Debian runbook](splunk-debian/README.md#6-linux-logs-are-a-different-input).
+   actual destination index. See the [Debian runbook](splunkreadme.md#6-linux-logs-are-a-different-input).
 2. On the sender, inspect the existing service and forwarding rules:
 
    ```bash
@@ -264,6 +269,6 @@ Do not put real passwords, private keys or recovery-store contents in Git,
 team chat or incident reports. Use the approved secret store and scoring
 credential-update process.
 
-For confirmed incidents use [incident report](../../templates/incident-report.md);
-for recovery planning use [disaster recovery](../../templates/disaster-recovery.md).
+For confirmed incidents use [incident report](../templates/incident-report.md);
+for recovery planning use [disaster recovery](../templates/disaster-recovery.md).
 An unknown listener, young file or alert is a lead, not proof of compromise.

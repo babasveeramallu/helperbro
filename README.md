@@ -1,10 +1,19 @@
 # CCDC Machine Runbooks and Defense Toolkit
 
-**Start with your machine:** [Seven detailed machine READMEs](docs/machines/README.md).
-There are separate procedures for Rocky e-commerce, Ubuntu email, Debian Splunk,
-Windows AD, Windows MSSQL, Ubuntu workstation and Windows workstation. Each covers
-script behavior, safe execution order, parameters, verification, recovery and
-handoff. Packet values are labeled defaults, not verified live configuration.
+**Start with your machine:** [Runbook folder and shared procedures](runbook/README.md).
+All seven guides have distinct filenames in the top-level `runbook` folder:
+
+- AD/DNS: [addnsreadme.md](runbook/addnsreadme.md)
+- E-commerce / Rocky: [ecomreadme.md](runbook/ecomreadme.md)
+- Email / Ubuntu Server: [webmailreadme.md](runbook/webmailreadme.md)
+- Splunk / Debian: [splunkreadme.md](runbook/splunkreadme.md)
+- MSSQL / Windows: [mssqlreadme.md](runbook/mssqlreadme.md)
+- Ubuntu workstation: [ubuntuwkstreadme.md](runbook/ubuntuwkstreadme.md)
+- Windows workstation: [windowswkstreadme.md](runbook/windowswkstreadme.md)
+
+Each covers script behavior, safe execution order, parameters, verification,
+recovery and handoff. Packet values are labeled defaults, not verified live
+configuration. Run command examples from the repository root, not `runbook`.
 
 This repository contains Linux and Windows host audit/hardening tools and a
 packet-specific Splunk deployment workflow. The Windows forwarding profiles cover
@@ -20,7 +29,7 @@ parameter, expected results, troubleshooting, rollback boundaries, and handoff.
 
 | Need | Read |
 |---|---|
-| Work through the seven-machine topology | [Machine READMEs and shared procedures](docs/machines/README.md) |
+| Work through the seven-machine topology | [Machine READMEs and shared procedures](runbook/README.md) |
 | Deploy or verify a specific service | [Service deployment guides](docs/services/README.md) |
 | Deploy telemetry on your three assigned Windows hosts | [Your deployment order](#your-deployment-order) |
 | Understand exactly what the forwarding scripts do | [Detailed Splunk playbook](splunk/PLAYBOOK.md) |

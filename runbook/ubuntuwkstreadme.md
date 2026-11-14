@@ -1,6 +1,6 @@
-# Ubuntu workstation
+# Ubuntu workstation runbook
 
-[All machines](../README.md) | [Generic Linux workstation guide](../../services/linux-workstation.md)
+[All machines](README.md) | [Generic Linux workstation guide](../docs/services/linux-workstation.md)
 
 ## 1. Mission and facts to confirm
 
@@ -55,10 +55,10 @@ through a trusted channel, not by accepting every warning.
 
 | Script | Purpose | What it does not provide |
 |---|---|---|
-| [Linux first-hour](../../../linux/first-hour.sh) | Host audit and explicitly selected policy/firewall/persistence/password/Samba categories | Desktop provisioning, network configuration or automatic Linux log forwarding |
-| [Service probe](../../../linux/service-probe.sh) | Authorized single-target connectivity/content checks | Full service login, complete scoring or an intrusion scan |
-| [PAM helper](../../../linux/pam_policy.py) | Supported Debian-style auth edits when called by first-hour | An audit-only command or support for every custom/domain PAM stack |
-| [Standalone firewall](../../../linux/apply-firewall.sh) | Reviewed JSON-based input/output policy with timer | Automatic discovery of all browser, package, DNS, SSH and backend needs |
+| [Linux first-hour](../linux/first-hour.sh) | Host audit and explicitly selected policy/firewall/persistence/password/Samba categories | Desktop provisioning, network configuration or automatic Linux log forwarding |
+| [Service probe](../linux/service-probe.sh) | Authorized single-target connectivity/content checks | Full service login, complete scoring or an intrusion scan |
+| [PAM helper](../linux/pam_policy.py) | Supported Debian-style auth edits when called by first-hour | An audit-only command or support for every custom/domain PAM stack |
+| [Standalone firewall](../linux/apply-firewall.sh) | Reviewed JSON-based input/output policy with timer | Automatic discovery of all browser, package, DNS, SSH and backend needs |
 
 Windows `.ps1` hardeners and `Set-WindowsForwarder.ps1` do not configure this
 Linux machine. Do not run them through a compatibility shell as a substitute.
@@ -82,7 +82,7 @@ visible findings is not proof every user's schedules/keys were inspected.
 ## 4. Use this machine to verify the environment
 
 Use only authorized single targets and the live inventory. The packet defaults
-in the [machine index](../README.md#1-pick-your-machine) are starting points,
+in the [machine index](README.md#1-pick-your-machine) are starting points,
 not proof that those addresses still belong to the intended hosts.
 
 For already-installed probe dependencies:
@@ -197,7 +197,7 @@ workstation baseline. Do not layer it with another manager.
 
 ## 7. Logging and everyday checks
 
-Use the [optional manual syslog setup](../README.md#6-linux-syslog-is-a-separate-optional-manual-setup)
+Use the [optional manual syslog setup](README.md#6-linux-syslog-is-a-separate-optional-manual-setup)
 only after receiver/index/transport approval. Verify one new local marker is
 searchable centrally with the correct host and timestamp. This does not install
 application-file monitoring, auditd or a Linux Universal Forwarder.

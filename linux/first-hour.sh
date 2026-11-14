@@ -150,16 +150,19 @@ configure_host_firewall() {
     IFS= read -r answer
     [[ "$answer" == 'APPLY HOST FIREWALL AND KEEP ROLLBACK' ]] || { log INFO 'Host firewall cancelled.'; return 0; }
     unit="ccdc-host-firewall-rollback-$stamp"
-    # The rollback runs as a script so it can record itself; systemd would expand $ and % in inline arguments.
-    rollback_script="$report_dir/host-firewall-rollback-$stamp.sh"
+    # The rollback runs as a script so it can record itself. systemd expands $ and % in command
+    # arguments, so the script lives at a fixed path with neither; the report path stays inside it.
+    rollback_script="/run/ccdc-host-firewall-rollback-$stamp.sh"
     {
         printf '%s\n' '#!/usr/bin/env bash'
-        printf 'if %q delete table inet ccdc_host; then msg=%q; else msg=%q; fi\n' "$(command -v nft)" \
-            "Host firewall rolled back by $unit.timer: rules removed." \
-            "Host firewall rollback by $unit.timer failed; inspect 'nft list ruleset'."
+        printf 'if %q delete table inet ccdc_host; then rc=0 msg=%q; else rc=1 msg=%q; fi\n' "$(command -v nft)" \
+            "Host firewall rolled back by $unit: rules removed." \
+            "Host firewall rollback by $unit failed; inspect 'nft list ruleset'."
         printf '%s\n' 'command -v logger >/dev/null 2>&1 && logger -t ccdc-first-hour "$msg"'
         printf 'printf %q "$(date %q)" "$msg" >> %q\n' '[%s] CHANGE %s\n' '+%F %T%z' "$report"
+        printf '%s\n' 'exit "$rc"'
     } > "$rollback_script"
+    chmod 700 "$rollback_script"
     bash -n "$rollback_script" || { log ERROR "Rollback script failed a syntax check: $rollback_script"; return 2; }
     deadline="$(date -d '+180 seconds' '+%T')"
     systemd-run --quiet --unit="$unit" --on-active=180s /usr/bin/env bash "$rollback_script" || { log ERROR 'Could not arm rollback; no rules applied.'; return 2; }
@@ -167,7 +170,7 @@ configure_host_firewall() {
     log CHANGE "Applied host firewall; rollback=$unit.timer backup=$backup"
     log INFO "The rules are removed automatically at $deadline (180 seconds). Verify ping, every scored service and your own SSH access from another machine first."
     log INFO "To keep the rules: systemctl stop $unit.timer"
-    log INFO "To roll back now: systemctl stop $unit.timer && systemctl start $unit.service"
+    log INFO "To roll back now: systemctl stop $unit.timer && bash $rollback_script"
     log INFO "A rollback is written to this report and the system journal (journalctl -t ccdc-first-hour)."
 }
 

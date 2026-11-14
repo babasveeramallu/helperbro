@@ -13,6 +13,7 @@ parameter, expected results, troubleshooting, rollback boundaries, and handoff.
 
 | Need | Read |
 |---|---|
+| Deploy or verify a specific service | [Service deployment guides](docs/services/README.md) |
 | Deploy telemetry on your three assigned Windows hosts | [Your deployment order](#your-deployment-order) |
 | Understand exactly what the forwarding scripts do | [Detailed Splunk playbook](splunk/PLAYBOOK.md) |
 | Add packet-aware Windows firewalls and opt-in detection decoys | [Windows defense playbook](windows/DEFENSE-PLAYBOOK.md) |

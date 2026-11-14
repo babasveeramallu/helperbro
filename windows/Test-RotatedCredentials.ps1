@@ -39,6 +39,22 @@ try {
     }
     Write-Host 'PASS legacy and corrupt records fail without deletion'
 
+    foreach ($badEntry in @('truncated-entry', "later-user`tdpapi:not-valid`tPENDING")) {
+        Set-Content -LiteralPath $path -Value "test-user`t$protected`tPENDING", "test-user`tCHANGED", $badEntry -Encoding UTF8
+        $ErrorActionPreference = 'Continue'
+        try {
+            $output = 'DELETE' | & $shell -NoProfile -File $viewer -Path $path 2>&1 | Out-String
+            $code = $LASTEXITCODE
+        } finally { $ErrorActionPreference = 'Stop' }
+        if ($code -eq 0 -or -not (Test-Path -LiteralPath $path) -or
+            $output -notmatch [regex]::Escape($password) -or $output -notmatch 'CHANGED' -or
+            $output -notmatch 'Only readable entries were displayed' -or
+            $output -match 'type DELETE to remove') {
+            throw 'A later invalid entry hid recoverable credentials or allowed deletion.'
+        }
+    }
+    Write-Host 'PASS partial recovery displays valid records and blocks deletion'
+
     $scriptDir = Join-Path $fixture 'scripts'
     $libDir = Join-Path $scriptDir 'lib'
     New-Item -ItemType Directory -Path $libDir -Force | Out-Null

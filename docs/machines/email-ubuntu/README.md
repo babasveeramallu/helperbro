@@ -1,4 +1,4 @@
-# Ubuntu Server email machine
+# Ubuntu Server email / webmail machine
 
 [All machines](../README.md) | [Generic email guide](../../services/email.md)
 
@@ -10,21 +10,29 @@ version, address, mail products, domains and authentication provider are
 **unknown**. Postfix/Dovecot commands below apply only if those products are found.
 Helperbro does not install or configure a mail server.
 
+The diagram's Email machine has the scoreboard prefix `webmail`. These five
+checks are confirmed: **`webmail-imap`, `webmail-interactive`, `webmail-ping`,
+`webmail-smtp`, `webmail-ssh`**. SSH is therefore scored, not merely an optional
+administration path. The screenshot does not supply ports, TLS modes, accounts
+or the interactive workflow. If interactive means browser webmail, record its
+actual URL and required login/action; an SMTP banner is not that check.
+
 | Record | Actual value |
 |---|---|
 | Hostname / Ubuntu version / IP / gateway / DNS | `REPLACE_VERIFIED_VALUES` |
 | Mail domain / MX hostname and address / external relay | `REPLACE_VERIFIED_VALUES` |
 | SMTP/submission service and port/TLS mode | `REPLACE_VERIFIED_VALUES` |
-| POP/IMAP/webmail services and scored ports | `REPLACE_VERIFIED_VALUES` |
+| IMAP and interactive services, ports and required workflow | `REPLACE_VERIFIED_VALUES` |
 | Mailbox storage, ownership, quotas and service accounts | `REPLACE_VERIFIED_VALUES` |
 | Authentication source and approved test mailboxes | `REPLACE_VERIFIED_VALUES` |
 | Consistent mail/config backup and console contact | `REPLACE_VERIFIED_VALUES` |
 
 Typical ports are SMTP 25, submission 587 or implicit TLS 465, IMAP 143/993,
-POP3 110/995 and webmail 80/443. These are **possibilities**, not an instruction
-to enable all of them. Preserve actual scoring protocols, ping, SSH and outbound
-DNS/relay traffic. Changing an account password can break mailbox checks even
-when the mail daemons remain healthy.
+SSH 22 and browser webmail 80/443. These are **candidates**, not confirmed
+scoring ports or an instruction to enable all of them. POP3 is not a named
+check in this screenshot; retain it only where actually required. Preserve
+scored ICMP ping and outbound DNS/relay traffic. Changing an account password
+can break mailbox or SSH checks even when the mail daemons remain healthy.
 
 ## 2. Establish working behavior first
 
@@ -138,7 +146,8 @@ Run the UFW command only if installed. UFW/firewalld/container rules can interac
 with added nftables chains; one allow does not defeat another chain's drop.
 Do not disable a manager or flush the ruleset to simplify the plan.
 
-If SSH is scored, preview:
+SSH is scored in the supplied snapshot. Preserve public SSH reachability where
+required by event rules; preview:
 
 ```bash
 sudo bash linux/first-hour.sh --apply-host-firewall --public-ssh --report-dir /root/ccdc-reports/email-firewall-plan
@@ -149,8 +158,9 @@ processes and would open them publicly. It does not recognize a malicious SMTP
 proxy or a missing legitimate service. Review all listeners and future service
 needs before apply. A temporarily stopped service may not be discovered.
 
-If SSH is administration-only, use verified `--management-cidr` values instead;
-never combine them with `--public-ssh`. Do not scope scored SSH to a team subnet.
+Do not substitute `--management-cidr` for this scored SSH path or scope it to a
+team subnet. Only reconsider that policy if the official scoring definition
+changes. Never combine `--management-cidr` with `--public-ssh`.
 Use `--skip-port` only for an identified unauthorized listener; it can terminate
 existing inbound connections.
 
@@ -179,11 +189,14 @@ service protocol/TLS mode. Enter passwords interactively, never in arguments.
 1. Confirm domain/MX and mail-host DNS answers from the required network.
 2. Connect using the expected certificate hostname; verify trust and expiry.
 3. Perform the required authenticated submission or approved inbound delivery.
-4. Retrieve the new message over the actual POP/IMAP/webmail path.
+4. Retrieve the new message over the scored IMAP path and perform the separate
+   `webmail-interactive` workflow exactly as defined. Test POP only if also required.
 5. Check sender, recipient, unique subject/body, arrival time and mailbox.
 6. Confirm required relay behavior with the service owner; do not make the
    server an open relay or probe unrelated third-party mail systems.
-7. Check queue growth, local logs, fresh central receipt and current scoring.
+7. Test a new authorized SSH login and required ICMP echo separately; mail
+   delivery does not prove either check.
+8. Check queue growth, local logs, fresh central receipt and all five scored checks.
 
 For a **plaintext SMTP greeting** only, if that endpoint is expected:
 
@@ -221,7 +234,8 @@ passwords. PAM file backups do not undo password rotation.
 ## 8. Handoff
 
 - [ ] Mail product/version, domains, ports/TLS modes and auth source recorded.
-- [ ] A new message completed the required delivery and retrieval flow.
+- [ ] A new message completed SMTP/IMAP and the separate interactive workflow.
+- [ ] All five named checks verified, including a new SSH login and ping.
 - [ ] Queue/disk/inodes, scoring and SSH remain healthy.
 - [ ] Backups, changed files, timers and recovery scope recorded.
 - [ ] A fresh central marker is searchable, or missing coverage is assigned.

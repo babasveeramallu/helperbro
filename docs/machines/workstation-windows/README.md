@@ -10,6 +10,11 @@ administration, domain connectivity and telemetry working. Record the actual
 hostname/build, membership, DHCP/static owner, DNS/gateway, approved users,
 management tools, console access and any scored workstation services.
 
+No Windows workstation check is shown in the supplied 19-check scoreboard.
+Do not invent a scored RDP/WinRM server requirement from the role alone, but
+preserve actual administration, domain, DNS, time and logging dependencies.
+Recheck the portal for later additions; absence here is not a removal order.
+
 Do not change the computer name, join state, IP, accounts or trusted keys/
 certificates as a routine baseline. A running desktop may be the only control
 seat for multiple systems. Confirm another recovery path before any change.

@@ -87,22 +87,50 @@ audit/plan modes and do not assume one script's flags work on another.
 
 ## 4. Ports, scoring and dependencies
 
-Separate **confirmed scoring traffic**, ordinary dependencies, administration and
-ingestion. These are not interchangeable.
+The supplied scoreboard confirms these **19 check names across five server
+roles**. Its `ecomm` prefix maps to the diagram's Ecom machine and `webmail` to
+the Email machine; these prefixes do not establish actual hostnames or addresses.
 
-| Role | Starting point to verify, not an instruction to open everything |
+| Machine | Exact scored checks visible in the supplied scoreboard |
 |---|---|
-| E-commerce | Actual HTTP/HTTPS vhosts and ports, backend database/API/DNS, any scored FTP and passive range |
-| Email | Actual SMTP/submission, POP/IMAP, webmail, DNS/MX, TLS and relay paths |
-| Splunk | Packet query/management TCP 8089; verify Web TCP 8000, SSH and any additional scored services |
-| AD | Packet WinRM TCP 5985; 5986 only if configured; DNS, Kerberos, LDAP, SMB and replication dependencies |
-| MSSQL | Packet SQL TCP 1433, SMB/SOP TCP 445, RDP TCP 3389; named-instance ports may differ |
-| Workstations | Actual user/admin paths, DHCP, DNS, time and domain dependencies where applicable |
-| Every scored host | Preserve required ICMP echo; ping is not a TCP/UDP port |
+| AD / Windows | `ad-dns`, `ad-ping`, `ad-winrm` |
+| Ecom / Rocky | `ecomm-http`, `ecomm-ping` |
+| MSSQL / Windows | `mssql-mssql`, `mssql-ping`, `mssql-rdp`, `mssql-smb` |
+| Splunk / Debian | `splunk-chrony`, `splunk-mgmt`, `splunk-ping`, `splunk-query`, `splunk-ssh` |
+| Email / Ubuntu Server | `webmail-imap`, `webmail-interactive`, `webmail-ping`, `webmail-smtp`, `webmail-ssh` |
+| Ubuntu workstation | No workstation check shown |
+| Windows workstation | No workstation check shown |
+
+This confirms **which checks exist**, not their exact ports, credentials,
+transactions, source addresses or current health. Red/green history is not a
+live diagnosis. Confirm the current portal definitions before changing access.
+
+| Role | Port/protocol candidates to verify against those definitions |
+|---|---|
+| E-commerce | HTTP usually TCP 80; verify vhost, path, content and any HTTPS redirect/dependency |
+| Email | IMAP TCP 143/993; SMTP usually TCP 25 (465/587 if the actual check uses submission); SSH usually TCP 22; interactive endpoint/port unknown |
+| Splunk | Chrony/NTP usually UDP 123; SSH usually TCP 22; packet API/search TCP 8089 and Web TCP 8000 need check-by-check mapping |
+| AD | DNS TCP/UDP 53; packet WinRM TCP 5985, or 5986 only if configured |
+| MSSQL | Packet SQL TCP 1433, SMB TCP 445, RDP TCP 3389; named-instance ports may differ |
+| Ping on all five scored servers | ICMP echo, not a TCP/UDP port |
+
+Do not assume `splunk-mgmt` means Web 8000 or that management and query use
+different ports. The packet describes authenticated management/search on 8089,
+but the screenshot does not assign ports to either check. Likewise,
+`webmail-interactive` does not identify a URL, port or login workflow; if it is
+browser-based, verify the actual HTTP(S) endpoint and full transaction.
+
+Separate these checks from **dependencies**, administration and ingestion.
+AD authentication/replication, DNS, time, mail relays, application backends,
+DHCP and workstation access can still be essential without their own column.
+FTP, POP3 and additional listeners are not confirmed scored by this screenshot;
+do not enable them merely as guesses or remove them without dependency review.
+This table is not a replacement for a dependency-aware firewall plan.
 
 Windows-to-Splunk TCP 9997 is an **ingestion** default, not a scored login endpoint.
 Plain TCP syslog, for example 20514, is a different input and is not created by
-the receiver script. Verify the live scoring sheet before changing any port.
+the receiver script. Neither ingestion port is a named check in this scoreboard.
+Verify the live scoring sheet before changing any port.
 Do not source-restrict a public/scored service to the scoring engine or team
 subnet when current rules require general reachability.
 

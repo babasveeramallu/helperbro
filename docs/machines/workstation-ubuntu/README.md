@@ -9,6 +9,11 @@ available. It may be the only working administration path to another machine or
 an appliance. The diagram says Ubuntu workstation; its version, IP, DHCP/static
 configuration, domain membership and installed tools are **unknown**.
 
+No Ubuntu workstation check is shown in the supplied 19-check scoreboard.
+That is not permission to disable this control seat or its dependencies, nor
+proof that later rounds cannot add workstation checks. Keep its browser, SSH,
+DNS, time, logging and recovery paths usable.
+
 | Record | Actual value |
 |---|---|
 | Hostname / Ubuntu version / desktop user | `REPLACE_VERIFIED_VALUES` |

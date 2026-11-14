@@ -77,7 +77,7 @@ $ErrorActionPreference = 'Stop'
         foreach ($case in @('default','range-only','management','system','disable','whatif','missing-range',
             'inactive','empty','query-error','mask-readback','mask-input','ipv6-readback','host-readback','wrong-readback','invalid-mask',
             'dual-protocol','dual-disable','dual-scoped','legacy-udp','fresh-dual',
-            'kernel','kernel-disable','kernel-system','kernel-no-service','kernel-no-listener','kernel-wrong-pid')) {
+            'kernel','kernel-disable','kernel-system','kernel-no-service','kernel-no-listener','kernel-wrong-pid','kernel-disabled-helper')) {
             $script:HostListeners=@(3389,5985,445,8080)
             $script:HostListenerPid=1
             $script:HostKernelMode=''
@@ -117,6 +117,12 @@ $ErrorActionPreference = 'Stop'
                 if ($case -eq 'kernel-system') { $args.ScopeSystemPorts=$true; $args.ManagementRange=@('10.2.0.0/16') }
                 if ($case -eq 'kernel-no-listener') { $script:HostListeners=@() }
                 if ($case -eq 'kernel-wrong-pid') { $script:HostListenerPid=99 }
+                if ($case -eq 'kernel-disabled-helper') {
+                    foreach ($port in @(80,443,445,139)) {
+                        $name="CCDC-Detected-TCP-$port"
+                        $script:HostRules[$name]=[pscustomobject]@{Name=$name;DisplayName=$name;Enabled=$false;Direction='Inbound';Action='Allow';Protocol='TCP';LocalPort=$port;RemoteAddress=@('10.1.0.0/16');PolicyStoreSourceType='Local'}
+                    }
+                }
             }
             if ($case -in @('dual-protocol','dual-disable','dual-scoped','legacy-udp','fresh-dual')) {
                 $script:HostUdpListener=$true
@@ -163,7 +169,7 @@ $ErrorActionPreference = 'Stop'
             } elseif ($case -like 'kernel*') {
                 foreach ($port in @(80,443,445,139)) {
                     $rule=$script:HostRules["CCDC-Detected-TCP-$port"]
-                    $expected=if ($case -eq 'kernel-system' -and $port -in @(445,139)) { '10.2.0.0/16' } else { 'Any' }
+                    $expected=if ($case -eq 'kernel-disabled-helper') { '10.1.0.0/16' } elseif ($case -eq 'kernel-system' -and $port -in @(445,139)) { '10.2.0.0/16' } else { 'Any' }
                     if (-not $rule -or -not $rule.Enabled -or $rule.Protocol -ne 'TCP' -or
                         $rule.LocalPort -ne $port -or "$($rule.RemoteAddress)" -ne $expected) {
                         throw "Kernel-owned TCP/$port was not allowed with the requested scope."

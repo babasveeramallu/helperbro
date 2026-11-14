@@ -159,6 +159,10 @@ function Set-CCDCWindowsFirewall {
                 }
                 foreach ($existingRule in $existingRules) {
                     if (-not $created -and -not $scoped -and -not $DisableExistingInboundAllows) {
+                        if ($existingRule.Direction -eq 'Inbound' -and $existingRule.Action -eq 'Allow' -and "$($existingRule.Enabled)" -ne 'True') {
+                            Set-NetFirewallRule -InputObject $existingRule -Enabled True -ErrorAction Stop
+                            Write-Log CHANGE "Re-enabled detected service helper without changing its scope: $($existingRule.DisplayName)"
+                        }
                         Write-Log INFO "Preserved existing helper rule and scope: $($existingRule.DisplayName)"
                         continue
                     }

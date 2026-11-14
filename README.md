@@ -244,7 +244,7 @@ bash linux/first-hour.sh --apply-host-firewall --management-cidr 10.20.30.0/24
 Useful options:
 
 - `--apply`: execute requested changes. Must run as root. Destructive/lockout-sensitive actions require interactive typed confirmation.
-- `--set-account-policy`: plans or applies Debian/Ubuntu PAM password quality, history, faillock, and login.defs settings. Apply requires `pam_pwquality`, `pam_faillock`, a recognized Debian PAM layout, root, and an interactive terminal; it backs up files and verifies changes. Fedora/RHEL/Oracle Linux PAM changes are intentionally refused by this path.
+- `--set-account-policy`: plans or applies Debian/Ubuntu PAM password quality, history, faillock, and login.defs settings. Apply requires `pam_pwquality`, `pam_faillock`, a recognized Debian PAM layout, root, and an interactive terminal; it backs up files and verifies changes. Rocky/Alma/RHEL/Fedora/CentOS/Oracle Linux instead receive manual authselect-based commands in the console and report; no PAM changes are applied automatically, and the step exits nonzero (2, including audit mode) to signal required manual work.
 - `--apply-host-firewall` with `--management-cidr CIDR` or `--public-ssh`: audit or apply a host nftables firewall. Ping (IPv4 and IPv6) stays allowed. With `--management-cidr` (repeat for multiple ranges), SSH port 22 answers only those ranges; use this only when SSH is not a scored service on the host. With `--public-ssh`, SSH answers every source; use this when SSH is scored. Add `--skip-port tcp:PORT` or `udp:PORT` (repeatable) for any listener you do not recognize; explicit drop rules keep it closed, including existing connections. Skipping SSH can disconnect remote administration. Requires `ss`, `nft`, Python 3, and for apply: root, systemd, `systemd-run`, an interactive terminal, and a successful nft syntax check. A rollback timer is armed before applying.
 - `--disable-smbv1`: if Samba is installed, requires `crudini` and `testparm`, and asks for typed confirmation before changing Samba settings.
 - `--kill-persistence --remove-unit UNIT --remove-cron-file /etc/cron.d/FILE`: targets only explicitly named systemd units and regular non-symlink files under `/etc/cron.d`. Repeat target options as needed. Apply disables/masks units or removes the named cron files after confirmation.
@@ -288,6 +288,35 @@ sudo bash linux/apply-firewall.sh --apply --config linux/firewall.example.json
 Apply requires root, `nft`, `ss`, Python 3, a running systemd manager, and an interactive terminal. Just before applying, the script snapshots established TCP connections to authorized inbound services and permits their exact address/port tuples to send non-SYN ACK packets if conntrack initially sees them as new. These exceptions do not permit outbound SYNs and remain until the firewall table is removed. Connections created after the snapshot might still be interrupted. The script arms the configured rollback timer before applying. It defaults to drop for inbound and outbound traffic, so incomplete allowlists can break services or access. Keep the rollback armed until scoring and administration are verified. To keep the rules after verification, the script prints the exact systemd timer/service command; to roll back immediately, it prints the nft delete command.
 
 ### PAM helper
+
+On RHEL-family systems, run `sudo bash linux/first-hour.sh --set-account-policy`
+to record the manual procedure. It targets Rocky/RHEL 9 conventions; check the
+installed version's supported features before adapting it to other releases.
+The report includes package checks, backups, exact inspection/editor commands,
+configuration values, optional history/lockout feature commands, verification
+and console recovery instructions. Nonzero exit means the policy was **not**
+applied; later selected categories in that run will not proceed.
+
+Review the procedure step by step, not as one pasted script (the final commands
+are recovery commands, not normal apply steps). Replace existing active settings
+in the named configuration files with the listed values, one setting per line,
+and resolve conflicting PAM inline options. The procedure retains the current
+authselect profile and its features rather than forcibly switching identity
+providers to SSSD. If `authselect current` or `authselect check` fails, stop and
+consult the distribution's supported migration/custom-profile workflow; do not
+force-overwrite PAM or break domain identity.
+
+Password history requires the current profile to offer `with-pwhistory`; stop
+if it is unavailable. Lockout is a separately approved manual step because
+deliberate failed logins can deny service to scoring/service accounts.
+`login.defs` aging defaults do not update existing accounts. Keep console access,
+test only a disposable account, and protect the root-only backups.
+Run `bash linux/test-rhel-account-policy.sh` for fixture tests of report routing
+and printed-command syntax. No live Rocky authentication or PAM changes are
+validated by these tests.
+
+Authselect command reference:
+[upstream authselect manual](https://github.com/authselect/authselect/blob/master/src/man/authselect.8.adoc).
 
 `linux/pam_policy.py` is called by `first-hour.sh`; normally do not invoke it directly. It can be used for fixture-based testing with `--root` pointed at a disposable tree and a fresh `--backup-dir`. It edits only the listed PAM/login.defs files, rejects unrecognized PAM layouts and symlinked files, creates backups, verifies edits, and attempts rollback on failure.
 

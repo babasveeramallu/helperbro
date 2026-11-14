@@ -1,7 +1,14 @@
 function Set-CCDCWindowsFirewall {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
-    param([Parameter(Mandatory)][string[]]$ManagementRange, [switch]$ScopeSystemPorts)
-    if (-not $ManagementRange.Count) { throw 'Host firewall requires -ManagementRange; no rules changed.' }
+    param(
+        [string[]]$ManagementRange = @(),
+        [switch]$ScopeManagementPorts,
+        [switch]$ScopeSystemPorts,
+        [switch]$DisableExistingInboundAllows
+    )
+    if (($ScopeManagementPorts -or $ScopeSystemPorts) -and -not $ManagementRange.Count) {
+        throw 'Port scoping requires -ManagementRange; no rules changed.'
+    }
     foreach ($range in $ManagementRange) {
         $parts = $range.Split('/')
         if ($parts.Count -gt 2) { throw "Invalid management address/CIDR: $range" }
@@ -34,20 +41,35 @@ function Set-CCDCWindowsFirewall {
             Write-Log INFO "Mapped shared/system listener TCP/$($special.Port) to running service $($special.Service)."
         }
     }
-    $gpoAllows = @(Get-NetFirewallRule -PolicyStore ActiveStore -Direction Inbound -Enabled True -Action Allow -ErrorAction SilentlyContinue | Where-Object { $_.PolicyStoreSourceType -eq 'GroupPolicy' })
-    if ($gpoAllows.Count) { throw 'Active GPO inbound allow rules exist; review domain policy before enforcing a local-only allowlist.' }
+    $gpoAllows = @(Get-NetFirewallRule -PolicyStore ActiveStore -Direction Inbound -Enabled True -Action Allow -ErrorAction Stop | Where-Object { $_.PolicyStoreSourceType -eq 'GroupPolicy' })
+    if ($gpoAllows.Count) { Write-Log FLAG 'Active GPO inbound allow rules are preserved and may permit access beyond the requested local scopes.' }
+    $localAllows = @(Get-NetFirewallRule -PolicyStore PersistentStore -Direction Inbound -Enabled True -Action Allow -ErrorAction Stop)
+    foreach ($rule in $localAllows) {
+        $filter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop
+        Write-Log INFO "Existing inbound allow name=$($rule.Name) display=$($rule.DisplayName) remote=$(@($filter.RemoteAddress) -join ','); disable requested=$DisableExistingInboundAllows"
+    }
+    if (($ScopeManagementPorts -or $ScopeSystemPorts) -and -not $DisableExistingInboundAllows) {
+        Write-Log FLAG 'Existing allows are preserved; scoped helper rules do not override other broader allow rules.'
+    }
     Write-Log INFO "Detected $(@($detected).Count) listener/service pairs. Management range=$($ManagementRange -join ',')."
-    if ($PSCmdlet.ShouldProcess('Windows Defender Firewall', 'Set default inbound block and replace local inbound allows')) {
+    if ($PSCmdlet.ShouldProcess('Windows Defender Firewall', "Set inbound default Block; disable existing allows=$DisableExistingInboundAllows; scope management=$ScopeManagementPorts; scope system=$ScopeSystemPorts")) {
         $backupPath = Join-Path $ReportDirectory ("firewall-before-{0}.clixml" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
         $backupWfw = [System.IO.Path]::ChangeExtension($backupPath, '.wfw')
         Get-NetFirewallProfile | Export-Clixml -LiteralPath $backupPath
         & netsh.exe advfirewall export $backupWfw | Out-Null
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $backupWfw)) { throw 'Could not export a restorable Windows Firewall backup; no rules changed.' }
         try {
-            $localAllows = @(Get-NetFirewallRule -PolicyStore PersistentStore -Direction Inbound -Enabled True -Action Allow -ErrorAction SilentlyContinue)
             $localAllows | Export-Clixml -LiteralPath ($backupPath + '.rules')
-            $localAllows | Disable-NetFirewallRule
-            Set-NetFirewallProfile -Profile Domain,Private,Public -DefaultInboundAction Block -Enabled True
+            $disabled = [System.Collections.Generic.List[string]]::new()
+            $narrowed = [System.Collections.Generic.List[string]]::new()
+            if ($DisableExistingInboundAllows) {
+                foreach ($rule in $localAllows) {
+                    $rule | Disable-NetFirewallRule -ErrorAction Stop
+                    $disabled.Add("$($rule.Name) ($($rule.DisplayName))")
+                    Write-Log CHANGE "Disabled inbound allow name=$($rule.Name) display=$($rule.DisplayName)"
+                }
+            }
+            Set-NetFirewallProfile -Name Domain,Private,Public -DefaultInboundAction Block -Enabled True -ErrorAction Stop
             foreach ($entry in $detected) {
                 $name = switch ($entry.Port) {
                     3389 { "CCDC-Host-RDP-$($entry.Port)"; break }
@@ -55,8 +77,13 @@ function Set-CCDCWindowsFirewall {
                     default { "CCDC-Detected-$($entry.Protocol)-$($entry.Port)" }
                 }
                 $systemPort = $ScopeSystemPorts -and $entry.Port -in @(135,137,138,139,445,5040,5050,5353,7680,1900,3702) -or ($ScopeSystemPorts -and $entry.Port -ge 49152)
-                $remote = if ($entry.Port -in @(3389,5985,5986) -or $systemPort) { $ManagementRange } else { 'Any' }
+                $scoped = ($ScopeManagementPorts -and $entry.Port -in @(3389,5985,5986)) -or $systemPort
+                $remote = if ($scoped) { $ManagementRange } else { 'Any' }
                 $existingRule = Get-NetFirewallRule -PolicyStore PersistentStore -DisplayName $name -ErrorAction SilentlyContinue
+                if ($existingRule -and -not $scoped -and -not $DisableExistingInboundAllows) {
+                    Write-Log INFO "Preserved existing helper rule and scope: $name"
+                    continue
+                }
                 if (-not $existingRule) {
                     $existingRule = New-NetFirewallRule -PolicyStore PersistentStore -DisplayName $name -Direction Inbound -Action Allow -Enabled True -Protocol $entry.Protocol -LocalPort $entry.Port -RemoteAddress $remote -Profile Domain,Private,Public
                 } else {
@@ -66,18 +93,19 @@ function Set-CCDCWindowsFirewall {
                 }
                 $addressFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule
                 Set-NetFirewallAddressFilter -InputObject $addressFilter -RemoteAddress $remote
+                if ($scoped) {
+                    $actual = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule -ErrorAction Stop).RemoteAddress)
+                    if (Compare-Object ($ManagementRange | Sort-Object) ($actual | Sort-Object)) {
+                        throw "Source scope verification failed for $name."
+                    }
+                }
                 Write-Log CHANGE "Allow $($entry.Protocol)/$($entry.Port) service=$($entry.Service) remote=$($remote -join ',')"
+                if ($scoped) { $narrowed.Add("$name remote=$($remote -join ',')") }
             }
             $after = Get-NetFirewallProfile
             if (@($after | Where-Object { $_.DefaultInboundAction -ne 'Block' }).Count) { throw 'Firewall default-action verification failed.' }
-            foreach ($port in @(3389,5985,5986)) {
-                $name = if ($port -eq 3389) { "CCDC-Host-RDP-$port" } else { "CCDC-Host-WinRM-$port" }
-                $rule = Get-NetFirewallRule -PolicyStore PersistentStore -DisplayName $name -ErrorAction SilentlyContinue
-                if ($rule -and $rule.Enabled) {
-                    $remote = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule).RemoteAddress)
-                    if (Compare-Object ($ManagementRange | Sort-Object) ($remote | Sort-Object)) { throw "Management source verification failed for $name." }
-                }
-            }
+            Write-Log INFO "Firewall disabled-rule summary ($($disabled.Count)): $($disabled -join '; ')"
+            Write-Log INFO "Firewall scoped-rule summary ($($narrowed.Count)): $($narrowed -join '; ')"
             Write-Log CHANGE "Firewall defaults verified as Block. Backup=$backupWfw; test scoring/admin reachability before continuing."
         } catch {
             $failure = $_.Exception.Message

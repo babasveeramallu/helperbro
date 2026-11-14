@@ -19,6 +19,12 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib\Common.ps1')
 . (Join-Path $PSScriptRoot 'lib\Standalone.ps1')
 
+if ($Action -eq 'Show' -and $StorePath) {
+    $StorePath = Convert-Path -LiteralPath $StorePath
+} else {
+    $StoreDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($StoreDirectory)
+}
+
 if ($Action -eq 'Show') {
     if (-not $StorePath) {
         $latest = Get-ChildItem -LiteralPath $StoreDirectory -File -Filter 'local-passwords-*.dat' |

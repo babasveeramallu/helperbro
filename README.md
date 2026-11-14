@@ -612,6 +612,10 @@ are not listening; disabled helpers are not re-enabled solely for scoping.
 Scope verification compares network addresses and prefix lengths, accepting
 equivalent IPv4 CIDR/netmask and IPv6 spellings rather than requiring identical
 provider strings. Other broader allows can still permit access.
+New management helper names include the transport (for example,
+`CCDC-Host-RDP-TCP-3389` and `CCDC-Host-RDP-UDP-3389`). Legacy helpers are
+reused only for their actual protocol, preserving existing scopes by default;
+one transport's listener never converts the other transport's rule.
 
 `auto-harden.ps1` enables `-RequireSmbSigning` and `-DisableSpooler` on every role,
 but never opts into firewall rule disabling or port scoping. Use `-KeepSpooler`

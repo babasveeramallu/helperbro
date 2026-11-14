@@ -389,10 +389,14 @@ if [[ "$kill_persistence" == true && "$apply" == true ]]; then
     for unit in "${remove_units[@]}"; do
         systemctl disable --now -- "$unit" || log FLAG "disable --now failed for $unit; continuing"
         unit_file="$(systemctl show -p FragmentPath --value -- "$unit" 2>/dev/null || true)"
-        # mask refuses when a real unit file sits in /etc/systemd/system, so move that file aside first.
-        if [[ "$unit_file" == /etc/systemd/system/* && -f "$unit_file" && ! -L "$unit_file" ]]; then
-            cp -p -- "$unit_file" "$evidence_dir/units/"
-            log CHANGE "Saved $unit_file to $evidence_dir/units sha256=$(sha256sum -- "$unit_file" | cut -d' ' -f1)"
+        # mask refuses when a real unit file sits at /etc/systemd/system/UNIT, so move that file aside first.
+        # Only that exact file: a template such as worker@.service also defines other instances, so it stays.
+        unit_id="$(systemctl show -p Id --value -- "$unit" 2>/dev/null || true)"
+        if [[ -n "$unit_id" && "$unit_file" == "/etc/systemd/system/$unit_id" && -f "$unit_file" && ! -L "$unit_file" ]]; then
+            saved="$evidence_dir/units/$unit_id"
+            cp -p -- "$unit_file" "$saved"
+            digest="$(sha256sum -- "$saved" | cut -d' ' -f1)" || { log ERROR "Could not hash $saved; $unit_file left in place"; exit 2; }
+            log CHANGE "Saved $unit_file to $saved sha256=$digest"
             rm -- "$unit_file"
             systemctl daemon-reload
         fi
@@ -400,12 +404,16 @@ if [[ "$kill_persistence" == true && "$apply" == true ]]; then
         else log FLAG "Could not mask $unit: it is disabled but could be re-enabled; check it by hand"; fi
     done
     for path in "${remove_cron_files[@]}"; do
-        cp -p -- "$path" "$evidence_dir/cron/"
-        log CHANGE "Saved $path to $evidence_dir/cron sha256=$(sha256sum -- "$path" | cut -d' ' -f1)"
+        # Keep the path below /etc/cron.d, so /etc/cron.d/job and /etc/cron.d/archive/job do not overwrite each other.
+        saved="$evidence_dir/cron/${path#/etc/cron.d/}"
+        install -d -m 700 -- "$(dirname -- "$saved")"
+        cp -p -- "$path" "$saved"
+        digest="$(sha256sum -- "$saved" | cut -d' ' -f1)" || { log ERROR "Could not hash $saved; $path left in place"; exit 2; }
+        log CHANGE "Saved $path to $saved sha256=$digest"
         rm -- "$path"
         log CHANGE "Removed $path"
     done
-    log INFO "Removed files are kept in $evidence_dir; copy one back to undo."
+    log INFO "Removed files are kept in $evidence_dir. To undo a unit: systemctl unmask UNIT, copy its saved file back to /etc/systemd/system/, run systemctl daemon-reload, then enable or start it only if it was before. To undo a cron file, copy it back under /etc/cron.d/."
 fi
 if [[ "$rotate" == true && "$apply" == true ]]; then
     (( EUID == 0 )) || { log ERROR 'Rotation needs root'; exit 2; }

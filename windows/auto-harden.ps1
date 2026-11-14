@@ -8,6 +8,7 @@ Always runs first-hour (account policy, legacy protocols, USB storage, additive 
 then the role scripts that match what is installed: domain controller, IIS web,
 IIS FTP, and workstation. Each step runs in its own process so one failure does not stop the rest.
 Use -PlanOnly to preview. Password rotation and scheduled-task disabling are never automatic.
+Anonymous FTP is left as it is unless -DisableAnonymousFtp is given (a scored check may log in anonymously).
 #>
 [CmdletBinding()]
 param(
@@ -15,6 +16,7 @@ param(
     [switch]$KeepSpooler,
     [switch]$SkipFirewall,
     [switch]$SkipUsb,
+    [switch]$DisableAnonymousFtp,
     [string[]]$ManagementRange = @(),
     [string]$ReportDirectory = "$env:LOCALAPPDATA\CCDC\Reports"
 )
@@ -79,7 +81,12 @@ Invoke-Step 'first-hour (common)' (Join-Path $here 'first-hour.ps1') $firstHour
 $common = $roleMode + @('-ReportDirectory', $ReportDirectory)
 if ($isDc) { Invoke-Step 'AD/DNS' (Join-Path $here 'addns\harden-addns.ps1') (@('-SecureDnsZones', '-HardenDcAuth', '-DisableSpooler', '-EnableAuditPolicy') + $common) }
 if ($hasIis) { Invoke-Step 'IIS web' (Join-Path $here 'webserver\harden-webserver.ps1') (@('-DisableDirectoryBrowsing', '-HideServerHeader', '-HardenTls', '-EnableAuditPolicy') + $common) }
-if ($hasFtp) { Invoke-Step 'IIS FTP' (Join-Path $here 'ftpserver\harden-ftpserver.ps1') (@('-DisableAnonymousFtp', '-EnableFtpLogging', '-HardenTls', '-EnableAuditPolicy') + $common) }
+if ($hasFtp) {
+    $ftpArgs = @('-EnableFtpLogging', '-HardenTls', '-EnableAuditPolicy')
+    if ($DisableAnonymousFtp) { $ftpArgs = @('-DisableAnonymousFtp') + $ftpArgs }
+    else { Write-Step 'Anonymous FTP left unchanged; add -DisableAnonymousFtp if no scored check logs in anonymously.' }
+    Invoke-Step 'IIS FTP' (Join-Path $here 'ftpserver\harden-ftpserver.ps1') ($ftpArgs + $common)
+}
 if (-not $isServer -or $roles -contains 'workstation-baseline') {
     $ws = @('-HardenCredentials', '-EnablePowerShellLogging', '-DisableAutorun', '-EnableDefender', '-EnableAuditPolicy') + $common
     if ($isServer) { $ws += '-SkipRestorePoint' }
@@ -89,6 +96,6 @@ if (-not $isServer -or $roles -contains 'workstation-baseline') {
 Write-Step 'Summary'
 $results | ForEach-Object { Write-Host "  $_" }
 Write-Host "Reports: $ReportDirectory"
-Write-Host 'Not automatic: password rotation (-RotatePasswords) and disabling tasks (-KillPersistence); -RequireFtpTls needs a certificate. A reboot may be required.'
+Write-Host 'Not automatic: password rotation (-RotatePasswords), disabling tasks (-KillPersistence) and disabling anonymous FTP (-DisableAnonymousFtp); -RequireFtpTls needs a certificate. A reboot may be required.'
 
 

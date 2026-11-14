@@ -127,9 +127,10 @@ Entry point: `windows\auto-harden.ps1` (elevated PowerShell). It detects the hos
 .\windows\auto-harden.ps1              # apply everything applicable
 .\windows\auto-harden.ps1 -PlanOnly    # preview only
 .\windows\auto-harden.ps1 -SkipFirewall -SkipUsb
+.\windows\auto-harden.ps1 -DisableAnonymousFtp   # also turn off anonymous FTP logins
 ```
 
-Not automatic: password rotation, scheduled-task disabling, and `-RequireFtpTls` (needs a certificate). Take a snapshot first; a reboot may be required.
+Not automatic: password rotation, scheduled-task disabling, disabling anonymous FTP (`-DisableAnonymousFtp`; leave it off if a scored check logs in anonymously), and `-RequireFtpTls` (needs a certificate). Take a snapshot first; a reboot may be required.
 
 ### General first-hour audit and hardening
 

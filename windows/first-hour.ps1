@@ -230,7 +230,9 @@ try {
     if ($KillPersistence) {
         foreach ($taskName in $DisableTask) {
             if ($PSCmdlet.ShouldProcess($taskName, 'Disable scheduled task')) {
-                Disable-ScheduledTask -TaskPath (Split-Path $taskName -Parent) -TaskName (Split-Path $taskName -Leaf) | Out-Null
+                # Use the task object's own TaskPath, which keeps its trailing backslash (Split-Path drops it).
+                $task = Get-ScheduledTask | Where-Object { "$($_.TaskPath)$($_.TaskName)" -eq $taskName }
+                Disable-ScheduledTask -TaskPath $task.TaskPath -TaskName $task.TaskName | Out-Null
                 Write-Log CHANGE "Disabled explicitly named task $taskName"
             }
         }

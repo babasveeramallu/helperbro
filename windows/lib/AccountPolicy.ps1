@@ -6,7 +6,8 @@ function Set-CCDCAccountPolicy {
         [switch]$EnableAccountLockout,
         [ValidateRange(1,999)][int]$LockoutThreshold = 5,
         [ValidateRange(1,99999)][int]$LockoutDurationMinutes = 30,
-        [ValidateRange(1,99999)][int]$LockoutObservationWindowMinutes = 30
+        [ValidateRange(1,99999)][int]$LockoutObservationWindowMinutes = 30,
+        [ValidateRange(1,999)][int]$MaxPasswordAgeDays
     )
     if (-not $EnableAccountLockout -and @('LockoutThreshold','LockoutDurationMinutes','LockoutObservationWindowMinutes' |
         Where-Object { $PSBoundParameters.ContainsKey($_) }).Count) {
@@ -15,7 +16,12 @@ function Set-CCDCAccountPolicy {
     if ($EnableAccountLockout -and $LockoutObservationWindowMinutes -gt $LockoutDurationMinutes) {
         throw 'Lockout observation window cannot exceed lockout duration; no policy changed.'
     }
-    $maxAge = New-TimeSpan -Days 60
+    # Maximum password age is opt-in: lowering it expires every older password at once,
+    # which breaks scored logins with "must change password".
+    $setMaxAge = $PSBoundParameters.ContainsKey('MaxPasswordAgeDays')
+    if ($setMaxAge) {
+        Write-Log FLAG "Maximum password age opted in: $MaxPasswordAgeDays days. Any account whose password is older (and not set to never expire) must change it at its next logon, which can break scored and service logins."
+    } else { Write-Log INFO 'Maximum password age not selected; the existing value will be preserved.' }
     if ($EnableAccountLockout) {
         Write-Log FLAG "Account lockout opted in: threshold=$LockoutThreshold duration=$LockoutDurationMinutes minutes window=$LockoutObservationWindowMinutes minutes. Attackers can deliberately lock service/scoring accounts and deny service."
     } else { Write-Log INFO 'Account lockout not selected; existing threshold, duration and observation window will be preserved.' }
@@ -28,8 +34,9 @@ function Set-CCDCAccountPolicy {
         if ($PSCmdlet.ShouldProcess("Default domain policy $($domain.DNSRoot)", "Set password policy; configure lockout=$EnableAccountLockout")) {
             $parameters = @{
                 Identity=$domain.DNSRoot; MinPasswordLength=8; ComplexityEnabled=$true
-                PasswordHistoryCount=5; MaxPasswordAge=$maxAge; ErrorAction='Stop'
+                PasswordHistoryCount=5; ErrorAction='Stop'
             }
+            if ($setMaxAge) { $parameters.MaxPasswordAge=New-TimeSpan -Days $MaxPasswordAgeDays }
             if ($EnableAccountLockout) {
                 $parameters.LockoutThreshold=$LockoutThreshold
                 $parameters.LockoutDuration=New-TimeSpan -Minutes $LockoutDurationMinutes
@@ -37,7 +44,8 @@ function Set-CCDCAccountPolicy {
             }
             Set-ADDefaultDomainPasswordPolicy @parameters
             $after = Get-ADDefaultDomainPasswordPolicy -Identity $domain.DNSRoot -ErrorAction Stop
-            if ($after.MinPasswordLength -ne 8 -or -not $after.ComplexityEnabled -or $after.PasswordHistoryCount -ne 5 -or $after.MaxPasswordAge.TotalDays -ne 60) { throw 'Domain policy verification failed.' }
+            $expectedMaxAge = if ($setMaxAge) { New-TimeSpan -Days $MaxPasswordAgeDays } else { $before.MaxPasswordAge }
+            if ($after.MinPasswordLength -ne 8 -or -not $after.ComplexityEnabled -or $after.PasswordHistoryCount -ne 5 -or $after.MaxPasswordAge -ne $expectedMaxAge) { throw 'Domain policy verification failed.' }
             $expectedThreshold = if ($EnableAccountLockout) { $LockoutThreshold } else { $before.LockoutThreshold }
             $expectedDuration = if ($EnableAccountLockout) { New-TimeSpan -Minutes $LockoutDurationMinutes } else { $before.LockoutDuration }
             $expectedWindow = if ($EnableAccountLockout) { New-TimeSpan -Minutes $LockoutObservationWindowMinutes } else { $before.LockoutObservationWindow }
@@ -59,10 +67,12 @@ function Set-CCDCAccountPolicy {
     Copy-Item -LiteralPath $template -Destination $backup -Force
     $text = Get-Content -LiteralPath $template -Raw
     if ($text -notmatch '(?m)^\[System Access\]\s*$') { throw 'Exported security template has no [System Access] section; refusing edit.' }
-    $settings = [ordered]@{ MinimumPasswordLength = 8; PasswordHistorySize = 5; MaximumPasswordAge = 60; PasswordComplexity = 1 }
+    $settings = [ordered]@{ MinimumPasswordLength = 8; PasswordHistorySize = 5; PasswordComplexity = 1 }
+    if ($setMaxAge) { $settings.MaximumPasswordAge = $MaxPasswordAgeDays }
     $section = [regex]::Match($text, '(?ms)^\[System Access\]\r?\n.*?(?=^\[|\z)').Value
+    # Values that must read back unchanged unless explicitly selected.
     $expectedLockout = @{}
-    foreach ($key in @('LockoutBadCount','ResetLockoutCount','LockoutDuration')) {
+    foreach ($key in @('LockoutBadCount','ResetLockoutCount','LockoutDuration','MaximumPasswordAge')) {
         $match = [regex]::Match($section, "(?m)^\s*$key\s*=\s*(-?\d+)\s*$")
         if ($match.Success) { $expectedLockout[$key] = [int]$match.Groups[1].Value }
     }
@@ -72,6 +82,7 @@ function Set-CCDCAccountPolicy {
         $settings.LockoutDuration=$LockoutDurationMinutes
         foreach ($key in @('LockoutBadCount','ResetLockoutCount','LockoutDuration')) { $expectedLockout[$key]=$settings[$key] }
     }
+    if ($setMaxAge) { $expectedLockout.MaximumPasswordAge=$MaxPasswordAgeDays }
     foreach ($key in $settings.Keys) {
         $line = "$key = $($settings[$key])"
         if ($section -match "(?m)^\s*$key\s*=.*$") { $section = [regex]::Replace($section, "(?m)^\s*$key\s*=.*$", $line) }
@@ -85,7 +96,8 @@ function Set-CCDCAccountPolicy {
             & $secedit.Source /configure /db (Join-Path $ReportDirectory "rollback-$stamp.sdb") /cfg $backup /areas SECURITYPOLICY /quiet | Out-Null
             throw "secedit configuration failed; attempted restore from $backup."
         }
-        $netArguments = @('accounts','/minpwlen:8','/uniquepw:5','/maxpwage:60')
+        $netArguments = @('accounts','/minpwlen:8','/uniquepw:5')
+        if ($setMaxAge) { $netArguments += "/maxpwage:$MaxPasswordAgeDays" }
         if ($EnableAccountLockout) {
             $netArguments += @("/lockoutthreshold:$LockoutThreshold","/lockoutduration:$LockoutDurationMinutes","/lockoutwindow:$LockoutObservationWindowMinutes")
         }
@@ -107,11 +119,11 @@ function Set-CCDCAccountPolicy {
             $match = [regex]::Match($verifySection, "(?m)^\s*$key\s*=\s*(-?\d+)\s*$")
             if (-not $match.Success -or [int]$match.Groups[1].Value -ne $expectedLockout[$key]) { $lockoutMatches=$false }
         }
-        if (-not $lockoutMatches -or $netVerify -notmatch 'Minimum password length:\s+8' -or $netVerify -notmatch 'Maximum password age \(days\):\s+60' -or $netVerify -notmatch 'Length of password history maintained:\s+5' -or $verifyText -notmatch '(?m)^PasswordComplexity\s*=\s*1') {
+        if (-not $lockoutMatches -or $netVerify -notmatch 'Minimum password length:\s+8' -or ($setMaxAge -and $netVerify -notmatch "Maximum password age \(days\):\s+$MaxPasswordAgeDays\b") -or $netVerify -notmatch 'Length of password history maintained:\s+5' -or $verifyText -notmatch '(?m)^PasswordComplexity\s*=\s*1') {
             & $secedit.Source /configure /db (Join-Path $ReportDirectory "rollback-verify-$stamp.sdb") /cfg $backup /areas SECURITYPOLICY /quiet | Out-Null
             throw "Local account policy verification failed; attempted restore from $backup. Inspect secedit export and net accounts output."
         }
-        Write-Log CHANGE "Verified local password complexity/history and lockout settings (lockout opted in=$EnableAccountLockout)."
+        Write-Log CHANGE "Verified local password complexity/history, maximum age and lockout settings (lockout opted in=$EnableAccountLockout; max age set=$setMaxAge)."
     }
 }
 

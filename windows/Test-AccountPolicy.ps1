@@ -33,7 +33,7 @@ $ErrorActionPreference = 'Stop'
         $script:PolicyState.NetCalls.Add(($args -join ' '))
         $global:LASTEXITCODE=0
         if ($args.Count -eq 1) {
-            "Minimum password length: 8`nMaximum password age (days): 60`nLength of password history maintained: 5"
+            "Minimum password length: 8`nMaximum password age (days): $($script:PolicyState.Local.MaximumPasswordAge)`nLength of password history maintained: 5"
         }
     }
     function Invoke-FixtureSecedit {
@@ -54,7 +54,7 @@ $ErrorActionPreference = 'Stop'
     }
     try {
         foreach ($domain in @($false,$true)) {
-            foreach ($case in @('default','disabled-existing','enabled','whatif','invalid-window','missing-switch')) {
+            foreach ($case in @('default','disabled-existing','enabled','max-age','whatif','invalid-window','missing-switch')) {
                 $script:PolicyState=@{
                     AD=@{MinPasswordLength=3;ComplexityEnabled=$false;PasswordHistoryCount=1;MaxPasswordAge=(New-TimeSpan -Days 90)
                         LockoutThreshold=17;LockoutDuration=(New-TimeSpan -Minutes 42);LockoutObservationWindow=(New-TimeSpan -Minutes 12)}
@@ -74,6 +74,7 @@ $ErrorActionPreference = 'Stop'
                     $parameters.LockoutDurationMinutes=25
                     $parameters.LockoutObservationWindowMinutes=9
                 }
+                if ($case -eq 'max-age') { $parameters.MaxPasswordAgeDays=60 }
                 if ($case -eq 'whatif') { $parameters.WhatIf=$true }
                 if ($case -eq 'invalid-window') { $parameters.LockoutObservationWindowMinutes=26 }
                 if ($case -eq 'missing-switch') { $parameters.LockoutThreshold=11 }
@@ -85,7 +86,9 @@ $ErrorActionPreference = 'Stop'
                     else { throw }
                 }
                 if ($case -in @('invalid-window','missing-switch') -and -not $failed) { throw 'Expected parameter validation failure.' }
-                $applied = $case -in @('default','disabled-existing','enabled')
+                $applied = $case -in @('default','disabled-existing','enabled','max-age')
+                # Maximum age is opt-in: only the max-age case may change it from the fixture's 90 days.
+                $maxAge=if ($case -eq 'max-age') {60} else {90}
                 $threshold=if ($case -eq 'enabled') {11} elseif ($case -eq 'disabled-existing') {0} else {17}
                 $duration=if ($case -eq 'enabled') {25} else {42}
                 $window=if ($case -eq 'enabled') {9} else {12}
@@ -93,14 +96,19 @@ $ErrorActionPreference = 'Stop'
                     $state=$script:PolicyState.AD
                     if ($state.LockoutThreshold -ne $threshold -or $state.LockoutDuration.TotalMinutes -ne $duration -or $state.LockoutObservationWindow.TotalMinutes -ne $window) { throw "Wrong AD lockout values for $case" }
                     if ($case -in @('default','disabled-existing') -and @($script:PolicyState.ADKeys | Where-Object { $_ -like 'Lockout*' }).Count) { throw 'Default sent AD lockout parameters.' }
-                    if ($applied -and ($state.MinPasswordLength -ne 8 -or -not $state.ComplexityEnabled -or $state.PasswordHistoryCount -ne 5 -or $state.MaxPasswordAge.TotalDays -ne 60)) { throw 'Password settings not preserved in AD path.' }
+                    if ($applied -and ($state.MinPasswordLength -ne 8 -or -not $state.ComplexityEnabled -or $state.PasswordHistoryCount -ne 5)) { throw 'Password settings not preserved in AD path.' }
+                    if ($state.MaxPasswordAge.TotalDays -ne $maxAge) { throw "Wrong AD maximum password age for $case" }
+                    if ($case -ne 'max-age' -and $script:PolicyState.ADKeys -contains 'MaxPasswordAge') { throw 'Sent AD MaxPasswordAge without -MaxPasswordAgeDays.' }
                     if (-not $applied -and $script:PolicyState.ADKeys.Count) { throw 'Unexpected AD write.' }
                 } else {
                     $state=$script:PolicyState.Local
                     if ($state.LockoutBadCount -ne $threshold -or $state.LockoutDuration -ne $duration -or $state.ResetLockoutCount -ne $window) { throw "Wrong local lockout values for $case" }
                     if ($case -in @('default','disabled-existing') -and @($script:PolicyState.NetCalls | Where-Object { $_ -match '/lockout' }).Count) { throw 'Default sent net lockout arguments.' }
                     if ($case -eq 'enabled' -and -not @($script:PolicyState.NetCalls | Where-Object { $_ -match '/lockoutthreshold:11 /lockoutduration:25 /lockoutwindow:9' }).Count) { throw 'Parameterized net lockout arguments missing.' }
-                    if ($applied -and ($state.MinimumPasswordLength -ne 8 -or $state.PasswordComplexity -ne 1 -or $state.PasswordHistorySize -ne 5 -or $state.MaximumPasswordAge -ne 60)) { throw 'Password settings not preserved in local path.' }
+                    if ($applied -and ($state.MinimumPasswordLength -ne 8 -or $state.PasswordComplexity -ne 1 -or $state.PasswordHistorySize -ne 5)) { throw 'Password settings not preserved in local path.' }
+                    if ($state.MaximumPasswordAge -ne $maxAge) { throw "Wrong local maximum password age for $case" }
+                    if ($case -ne 'max-age' -and @($script:PolicyState.NetCalls | Where-Object { $_ -match '/maxpwage' }).Count) { throw 'Sent net /maxpwage without -MaxPasswordAgeDays.' }
+                    if ($case -eq 'max-age' -and -not @($script:PolicyState.NetCalls | Where-Object { $_ -match '/maxpwage:60' }).Count) { throw 'net /maxpwage:60 missing.' }
                     if (-not $applied -and ($script:PolicyState.Configures -or $script:PolicyState.NetCalls.Count)) { throw 'Unexpected local policy write.' }
                 }
                 Write-Host "PASS account policy domain=$domain $case"

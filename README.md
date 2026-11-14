@@ -1,9 +1,16 @@
-# CCDC Windows Defense and Splunk Operator Guide
+# CCDC Machine Runbooks and Defense Toolkit
 
-This repository contains host audit/hardening tools and a packet-specific Splunk
-deployment workflow. For your assignment, prioritize **AD Windows, MSSQL Windows,
-and the Windows workstation forwarding to Debian Splunk**. Collect and verify
-telemetry before making unrelated authentication or firewall changes.
+**Start with your machine:** [Seven detailed machine READMEs](docs/machines/README.md).
+There are separate procedures for Rocky e-commerce, Ubuntu email, Debian Splunk,
+Windows AD, Windows MSSQL, Ubuntu workstation and Windows workstation. Each covers
+script behavior, safe execution order, parameters, verification, recovery and
+handoff. Packet values are labeled defaults, not verified live configuration.
+
+This repository contains Linux and Windows host audit/hardening tools and a
+packet-specific Splunk deployment workflow. The Windows forwarding profiles cover
+**AD, MSSQL and the Windows workstation sending to Debian Splunk**; the machine
+runbooks also explain the Rocky store, Ubuntu mail server and Ubuntu workstation.
+Collect and verify telemetry before unrelated authentication or firewall changes.
 
 **Start here:** [Detailed Windows-to-Debian Splunk playbook](splunk/PLAYBOOK.md).
 It explains every deployment stage, the files and services changed, every
@@ -13,6 +20,7 @@ parameter, expected results, troubleshooting, rollback boundaries, and handoff.
 
 | Need | Read |
 |---|---|
+| Work through the seven-machine topology | [Machine READMEs and shared procedures](docs/machines/README.md) |
 | Deploy or verify a specific service | [Service deployment guides](docs/services/README.md) |
 | Deploy telemetry on your three assigned Windows hosts | [Your deployment order](#your-deployment-order) |
 | Understand exactly what the forwarding scripts do | [Detailed Splunk playbook](splunk/PLAYBOOK.md) |
@@ -117,11 +125,12 @@ Run from an elevated Windows PowerShell 5.1 session. The role scripts load share
 
 ### One-command auto-hardening
 
-**Not the starting point for this team packet.** This tool can scope scored
-management services to local/admin ranges. Review the packet's public-service
-requirements and every planned category before considering apply.
+**Not the starting point for this team packet.** This tool combines many changes
+without individual script confirmation. Its current host-firewall step preserves
+existing allows and does not opt into port scoping. Authentication, DNS, TLS,
+signing and other changes can still break scoring; review every category first.
 
-Entry point: `windows\auto-harden.ps1` (elevated PowerShell). It detects the host (domain controller, IIS web, IIS FTP, workstation) and applies every applicable category without prompting: account policy, legacy protocols, USB storage, and a host firewall scoped to the local subnet(s), plus the matching role script switches. Each step runs separately, so one failure does not stop the rest.
+Entry point: `windows\auto-harden.ps1` (elevated PowerShell). It detects the host (domain controller, IIS web, IIS FTP, workstation baseline) and applies common account policy, legacy-protocol controls, SMB signing, Spooler disabling, USB storage controls and an additive discovered-listener firewall, plus matching role-script categories. Skip switches can omit some common steps. Existing lockout and maximum password age are preserved. Each step runs separately, so one failure does not stop the rest; inspect every exit code.
 
 ```powershell
 .\windows\auto-harden.ps1              # apply everything applicable

@@ -37,6 +37,12 @@ timeout=$((10#$timeout))
 [[ $path == /* && $path != *[[:space:][:cntrl:]]* ]] || die 'Invalid HTTP path'
 if [[ $protocol == dns ]]; then
     [[ $expect =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*=([0-9A-Fa-f:.]+)$ ]] || die 'DNS requires --expect NAME=ADDRESS'
+    if ! command -v python3 >/dev/null 2>&1; then
+        printf 'unknown Python 3 is required for DNS address validation\n'
+        exit 2
+    fi
+    python3 -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "${expect#*=}" 2>/dev/null ||
+        die 'DNS requires --expect NAME=ADDRESS with a valid IPv4 or IPv6 address'
 fi
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

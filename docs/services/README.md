@@ -77,9 +77,9 @@ approved version or authenticating its published release.
 On Linux, if Git and an approved public download path already exist:
 
 ```bash
-git clone https://github.com/babasveeramallu/helperbro.git "$HOME/helperbro"
-cd "$HOME/helperbro"
-git rev-parse HEAD
+git clone https://github.com/babasveeramallu/helperbro.git "$HOME/helperbro" &&
+  cd "$HOME/helperbro" &&
+  git rev-parse HEAD
 ```
 
 `git clone` fails if the destination already exists and is not empty. Confirm
@@ -95,21 +95,22 @@ transaction, validate file contents beyond the supplied text, or prove scoring
 or log ingestion. TCP is a connection test; mail/FTP checks are banners.
 HTTPS verifies the server certificate and hostname; use the actual DNS name
 and a trusted certificate. Redirects are not followed. DNS expects an A or
-AAAA answer; on Windows, only DNS port 53 is supported.
+AAAA answer; Linux DNS probes require Python 3, and Windows supports only DNS
+port 53. HTTP text matching assumes UTF-8 for non-ASCII text on Windows.
 
-On Linux, set `TARGET` to the authorized host and `EXPECTED` to the exact
-expected text or `name=address` DNS answer before using these examples:
+On Linux, set `TARGET` to the authorized host, `PAGE_TEXT` to the expected
+page text and `DNS_ANSWER` to the expected `name=address` DNS answer:
 
 ```bash
-bash linux/service-probe.sh https "$TARGET" 443 --path / --expect "$EXPECTED"
-bash linux/service-probe.sh dns "$TARGET" 53 --expect "$EXPECTED"
+bash linux/service-probe.sh https "$TARGET" 443 --path / --expect "$PAGE_TEXT"
+bash linux/service-probe.sh dns "$TARGET" 53 --expect "$DNS_ANSWER"
 ```
 
-On Windows, set `$Target` and `$Expected` first:
+On Windows, set `$Target`, `$PageText` and `$DnsAnswer` first:
 
 ```powershell
-.\windows\Invoke-ServiceProbe.ps1 -Protocol https -Target $Target -Port 443 -Expect $Expected
-.\windows\Invoke-ServiceProbe.ps1 -Protocol dns -Target $Target -Port 53 -Expect $Expected
+.\windows\Invoke-ServiceProbe.ps1 -Protocol https -Target $Target -Port 443 -Expect $PageText
+.\windows\Invoke-ServiceProbe.ps1 -Protocol dns -Target $Target -Port 53 -Expect $DnsAnswer
 ```
 
 Protocols are `http`, `https`, `dns`, `tcp`, `smtp`, `pop3`, `imap`, and

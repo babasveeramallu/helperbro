@@ -44,7 +44,7 @@ function Invoke-LabTcpExchange {
                 if ($n -le 0) { break }
                 $ms.Write($buf, 0, $n)
                 if ($FirstLine) {
-                    $text = [Text.Encoding]::ASCII.GetString($ms.ToArray())
+                    $text = [Text.Encoding]::UTF8.GetString($ms.ToArray())
                     $end = $text.IndexOf("`n")
                     if ($end -ge 0) {
                         $closing = [Text.Encoding]::ASCII.GetBytes("$Quit`r`n")
@@ -57,7 +57,7 @@ function Invoke-LabTcpExchange {
                 }
             }
             if ($FirstLine -or $ms.Length -ge 65536) { return $null }
-            return [Text.Encoding]::ASCII.GetString($ms.ToArray())
+            return [Text.Encoding]::UTF8.GetString($ms.ToArray())
         } finally { $ms.Dispose() }
     } catch {
         return $null
@@ -92,17 +92,25 @@ function Invoke-LabProbe {
                 -Send "GET $Path HTTP/1.0`r`nHost: $authority`r`nConnection: close`r`n`r`n"
             if (-not $out) { return 'fail no HTTP response' }
             if ($out -notmatch '^HTTP/[0-9.]+ ([0-9]{3})') { return 'fail not an HTTP response' }
-            return Get-LabHttpResult $Matches[1] $out $Expect
+            $code = $Matches[1]
+            $separator = $out.IndexOf("`r`n`r`n")
+            $separatorLength = 4
+            if ($separator -lt 0) { $separator = $out.IndexOf("`n`n"); $separatorLength = 2 }
+            if ($separator -lt 0) { return 'fail incomplete HTTP headers' }
+            return Get-LabHttpResult $code ($out.Substring($separator + $separatorLength)) $Expect
         }
         'https' {
             $tool = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue  # lab-guard: allow network -- only checks whether curl.exe is installed
             if (-not $tool) { return 'unknown no tool on this host can probe https' }
             $saved = $ErrorActionPreference
+            $savedEncoding = [Console]::OutputEncoding
             $ErrorActionPreference = 'Continue'
             try {
-                $out = @(& $tool.Source -sS --noproxy '*' --max-time $Timeout --max-filesize 65536 -w '\n%{http_code}' -- "https://${hostPart}:$Port$Path" 2>$null)
+                [Console]::OutputEncoding = [Text.Encoding]::UTF8
+                $out = @(& $tool.Source -q -sS --globoff --noproxy '*' --max-time $Timeout --max-filesize 65536 -w '\n%{http_code}' -- "https://${hostPart}:$Port$Path" 2>$null)
                 $rc = $LASTEXITCODE
             } finally {
+                [Console]::OutputEncoding = $savedEncoding
                 $ErrorActionPreference = $saved
             }
             if ($rc -ne 0 -or $out.Count -eq 0) { return "fail the https client exited $rc" }
@@ -112,7 +120,8 @@ function Invoke-LabProbe {
             if ($Port -ne 53) { return 'unknown Windows can only query DNS on port 53' }
             if (-not (Get-Command Resolve-DnsName -ErrorAction SilentlyContinue)) { return 'unknown no Resolve-DnsName on this host' }
             $qname, $answer = $Expect -split '=', 2
-            $answer = $answer.TrimEnd('.')
+            $expectedAddress = $null
+            if (-not [Net.IPAddress]::TryParse($answer, [ref]$expectedAddress)) { return 'fail invalid DNS address' }
             $type = if ($answer.Contains(':')) { 'AAAA' } else { 'A' }
             try {
                 $records = @(Resolve-DnsName -Name $qname -Server $Target -Type $type -DnsOnly -QuickTimeout -ErrorAction Stop)
@@ -120,9 +129,10 @@ function Invoke-LabProbe {
                 return "fail no answer from $Target"
             }
             foreach ($r in $records) {
-                foreach ($prop in @('IPAddress', 'NameHost')) {
-                    $p = $r.PSObject.Properties[$prop]
-                    if ($p -and "$($p.Value)".TrimEnd('.') -eq $answer) { return "pass $qname answered $answer" }
+                $p = $r.PSObject.Properties['IPAddress']
+                $actualAddress = $null
+                if ($p -and [Net.IPAddress]::TryParse([string]$p.Value, [ref]$actualAddress) -and $actualAddress.Equals($expectedAddress)) {
+                    return "pass $qname answered $answer"
                 }
             }
             return "fail $qname did not answer $answer"

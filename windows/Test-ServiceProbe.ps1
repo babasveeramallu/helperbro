@@ -113,6 +113,10 @@ function Invoke-LabProbe {
     Assert-ProbeResult 'empty HTTP' (Invoke-LabProbe -Proto http -Target example.test -Port 80 -Expect '-') 'fail no HTTP response'
     $script:HttpResponse = 'not HTTP'
     Assert-ProbeResult 'malformed HTTP' (Invoke-LabProbe -Proto http -Target example.test -Port 80 -Expect '-') 'fail not an HTTP response'
+    $script:HttpResponse = "HTTP/1.0 200 OK`r`nX-Health: Welcome`r`n`r`nMaintenance"
+    Assert-ProbeResult 'HTTP header is not body' (Invoke-LabProbe -Proto http -Target example.test -Port 80 -Expect Welcome) 'fail status 200 but the expected text is missing'
+    $script:HttpResponse = "HTTP/1.0 200 OK`r`nX-Health: Welcome"
+    Assert-ProbeResult 'incomplete HTTP headers' (Invoke-LabProbe -Proto http -Target example.test -Port 80 -Expect Welcome) 'fail incomplete HTTP headers'
     $script:HttpResponse = "HTTP/1.0 302 Found`r`n`r`nMoved"
     Assert-ProbeResult 'redirect status' (Invoke-LabProbe -Proto http -Target example.test -Port 80 -Expect Moved -Path '/health') 'pass status 302'
     if ($script:ProbeRequest -cne "GET /health HTTP/1.0`r`nHost: example.test`r`nConnection: close`r`n`r`n") { throw 'FAIL HTTP request' }
@@ -145,9 +149,36 @@ function Invoke-LabProbe {
     }
     $script:DnsFails = $false
     Assert-ProbeResult 'IPv6 DNS' (Invoke-LabProbe -Proto dns -Target example.test -Port 53 -Expect 'example.test=2001:db8::1') 'pass example.test answered 2001:db8::1'
+    Assert-ProbeResult 'equivalent IPv6 DNS' (Invoke-LabProbe -Proto dns -Target example.test -Port 53 -Expect 'example.test=2001:0db8:0:0:0:0:0:1') 'pass example.test answered 2001:0db8:0:0:0:0:0:1'
     if ($script:DnsType -ne 'AAAA') { throw 'FAIL DNS record type' }
     $script:DnsFails = $true
     Assert-ProbeResult 'DNS error' (Invoke-LabProbe -Proto dns -Target example.test -Port 53 -Expect 'example.test=2001:db8::1') 'fail no answer from example.test'
+    $script:DnsFails = $false
+    function Resolve-DnsName {
+        param($Name,$Server,$Type,[switch]$DnsOnly,[switch]$QuickTimeout,$ErrorAction)
+        [pscustomobject]@{ NameHost = '192.0.2.10'; IPAddress = 'not-an-address' }
+    }
+    Assert-ProbeResult 'DNS non-address record' (Invoke-LabProbe -Proto dns -Target example.test -Port 53 -Expect 'example.test=192.0.2.10') 'fail example.test did not answer 192.0.2.10'
+    $fakeCurl = Join-Path $fixture 'fake-curl.ps1'
+    @'
+$args | Set-Content -LiteralPath $env:CCDC_PROBE_ARGS
+$global:LASTEXITCODE = 0
+Write-Output 'Welcome' '200'
+'@ | Set-Content -LiteralPath $fakeCurl
+    $env:CCDC_PROBE_ARGS = Join-Path $fixture 'curl-args.txt'
+    function Get-Command {
+        param($Name, $CommandType, $ErrorAction)
+        if ($Name -eq 'curl.exe') { return [pscustomobject]@{ Source = $fakeCurl } }
+        if ($Name -eq 'Resolve-DnsName') { return $null }
+        Microsoft.PowerShell.Core\Get-Command @PSBoundParameters
+    }
+    $originalEncoding = [Console]::OutputEncoding
+    Assert-ProbeResult 'HTTPS curl arguments' (Invoke-LabProbe -Proto https -Target example.test -Port 443 -Expect Welcome -Path '/{one,two}') 'pass status 200'
+    $curlArgs = @(Get-Content -LiteralPath $env:CCDC_PROBE_ARGS)
+    if ($curlArgs[0] -ne '-q' -or '--globoff' -notin $curlArgs -or
+        'https://example.test:443/{one,two}' -notin $curlArgs -or
+        [Console]::OutputEncoding.CodePage -ne $originalEncoding.CodePage) { throw 'FAIL curl configuration or encoding restoration' }
+    Remove-Item Env:\CCDC_PROBE_ARGS
     function Get-Command {
         param($Name, $CommandType, $ErrorAction)
         if ($Name -in @('curl.exe', 'Resolve-DnsName')) { return $null }
@@ -159,7 +190,7 @@ function Invoke-LabProbe {
     Write-Host 'PASS HTTP boundaries, protocol banners, TCP and DNS errors'
 
     . $module
-    foreach ($mode in @('complete', 'stall')) {
+    foreach ($mode in @('complete', 'unicode', 'stall')) {
         $ready = Join-Path $fixture "$mode.ready"
         $job = Start-Job -ArgumentList $ready, $mode -ScriptBlock {
             param($Ready, $Mode)
@@ -172,7 +203,8 @@ function Invoke-LabProbe {
                     $client.ReceiveTimeout = 3000
                     $reader = New-Object IO.StreamReader($client.GetStream())
                     while (($line = $reader.ReadLine()) -ne '' -and $null -ne $line) {}
-                    $bytes = [Text.Encoding]::ASCII.GetBytes("HTTP/1.0 200 OK`r`n`r`nWelcome")
+                    $body = if ($Mode -eq 'unicode') { "caf$([char]0xE9)" } else { 'Welcome' }
+                    $bytes = [Text.Encoding]::UTF8.GetBytes("HTTP/1.0 200 OK`r`n`r`n$body")
                     $client.GetStream().Write($bytes, 0, $bytes.Length)
                     if ($Mode -eq 'stall') { Start-Sleep -Seconds 5 }
                 } finally { $client.Close() }
@@ -182,8 +214,9 @@ function Invoke-LabProbe {
         while (-not (Test-Path -LiteralPath $ready) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
         if (-not (Test-Path -LiteralPath $ready)) { throw "FAIL $mode server did not start" }
         $port = [int](Get-Content -LiteralPath $ready)
-        $result = Invoke-LabProbe -Proto http -Target '127.0.0.1' -Port $port -Expect Welcome -Timeout 2
-        if (($mode -eq 'complete' -and $result -ne 'pass status 200') -or
+        $expected = if ($mode -eq 'unicode') { "caf$([char]0xE9)" } else { 'Welcome' }
+        $result = Invoke-LabProbe -Proto http -Target '127.0.0.1' -Port $port -Expect $expected -Timeout 2
+        if (($mode -in @('complete', 'unicode') -and $result -ne 'pass status 200') -or
             ($mode -eq 'stall' -and $result -notlike 'fail *')) { throw "FAIL $mode loopback: $result" }
         Stop-Job -Job $job
         Remove-Job -Job $job

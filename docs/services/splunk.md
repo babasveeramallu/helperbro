@@ -24,16 +24,18 @@ the window and inspect the backup location. Unencrypted TCP requires explicit
 
 ## One Windows sender at a time
 
-On each target, open x64 PowerShell at the repository root. Set `$Indexer` to
-the verified receiver address or name, then select the correct role:
+On each target, open x64 PowerShell at the repository root. Set `$Indexer` and
+`$Port` to the verified receiver address or name and forwarder receiving port,
+then select the correct role:
 
 ```powershell
-.\splunk\Set-WindowsForwarder.ps1 -Role AD -Indexer $Indexer -AuditOnly
+.\splunk\Set-WindowsForwarder.ps1 -Role AD -Indexer $Indexer -Port $Port -AuditOnly
 ```
 
 Use `MSSQL` or `Wkst` instead where appropriate. Audit reports a missing
 forwarder and does not install it. For apply, see the playbook's installer,
-signature, permissions, backup, confirmation and restart steps. Confirm the
+signature, permissions, backup, confirmation and restart steps. Use the same
+`$Indexer` and `$Port` for apply and any installer invocation. Confirm the
 forwarder's service identity can read the Security channel and SQL log files;
 the script does not grant those permissions. No Sysmon installation is implied.
 

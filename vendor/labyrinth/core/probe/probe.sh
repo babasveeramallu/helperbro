@@ -20,10 +20,21 @@ lab_probe_exchange() {
 }
 
 # lab_probe_banner HOST PORT TIMEOUT [QUIT]: connect and print the first line
-# the service sends, then say QUIT (or the given closing line) politely.
+# the service sends, then say QUIT (or the given closing line) politely. Read
+# bytes individually so embedded NULs cannot bypass the limit.
 lab_probe_banner() {
   # shellcheck disable=SC2016 # the inner script expands its own arguments
-  timeout "$3" bash -c 'exec 3<>"/dev/tcp/$1/$2" || exit 1; IFS= read -r line <&3 || exit 3; printf "%s" "$line"; printf "%s\r\n" "$3" >&3' _ "$1" "$2" "${4:-QUIT}"  # lab-guard: allow network -- probe of a listed scored service inside the event network
+  timeout "$3" bash -c 'export LC_ALL=C; exec 3<>"/dev/tcp/$1/$2" || exit 1
+    line=
+    for ((i=1; i<65536; i++)); do
+      IFS= read -r -d "" -n 1 char <&3 || exit 3
+      if [[ $char == $'\''\n'\'' ]]; then
+        printf "%s" "$line"; printf "%s\r\n" "$3" >&3; exit
+      fi
+      [[ -n $char ]] || exit 3
+      line+=$char
+    done
+    exit 3' _ "$1" "$2" "${4:-QUIT}"  # lab-guard: allow network -- probe of a listed scored service inside the event network
 }
 
 # lab_probe_connect HOST PORT TIMEOUT: can a TCP connection be opened?
@@ -38,7 +49,7 @@ lab_probe_http() {
   local proto="$1" host="$2" port="$3" expect="$4" t="$5" path="${6:-/}" url out code body status authority
   url="$proto://$(lab_probe_hostpart "$host"):$port$path"
   if command -v curl > /dev/null 2>&1; then  # lab-guard: allow network -- only checks whether curl is installed
-    if ! out="$(curl -sS --noproxy '*' --max-time "$t" --max-filesize 65536 -w '\n%{http_code}' -- "$url" 2>&1 | tr -d '\000')"; then
+    if ! out="$(curl -q -sS --globoff --noproxy '*' --max-time "$t" --max-filesize 65536 -w '\n%{http_code}' -- "$url" 2>&1 | tr -d '\000')"; then
       printf 'fail %s\n' "$(printf '%s' "$out" | tail -n 1)"
       return 0
     fi
@@ -47,14 +58,23 @@ lab_probe_http() {
   elif [[ "$proto" == http ]] && command -v timeout > /dev/null 2>&1; then
     authority="$(lab_probe_hostpart "$host")"
     [[ $port == 80 ]] || authority="$authority:$port"
-    if ! out="$(lab_probe_exchange "$host" "$port" "$t" "GET $path HTTP/1.0"$'\r\n'"Host: $authority"$'\r\n'"Connection: close"$'\r\n\r\n')" || [[ -z "$out" ]]; then
+    if ! out="$(lab_probe_exchange "$host" "$port" "$t" "GET $path HTTP/1.0"$'\r\n'"Host: $authority"$'\r\n'"Connection: close"$'\r\n\r\n' && printf '\001')"; then
       printf 'fail no HTTP response\n'
       return 0
     fi
+    out="${out%$'\001'}"
+    [[ -n "$out" ]] || { printf 'fail no HTTP response\n'; return 0; }
     status="${out%%$'\n'*}"
     [[ "$status" =~ ^HTTP/[0-9.]+\ ([0-9]{3}) ]] || { printf 'fail not an HTTP response\n'; return 0; }
     code="${BASH_REMATCH[1]}"
-    body="$out"
+    if [[ "$out" == *$'\r\n\r\n'* ]]; then
+      body="${out#*$'\r\n\r\n'}"
+    elif [[ "$out" == *$'\n\n'* ]]; then
+      body="${out#*$'\n\n'}"
+    else
+      printf 'fail incomplete HTTP headers\n'
+      return 0
+    fi
   else
     printf 'unknown no tool on this host can probe %s\n' "$proto"
     return 0
@@ -70,9 +90,12 @@ lab_probe_http() {
 
 lab_probe_dns() {
   local host="$1" port="$2" expect="$3" t="$4" qname answer type=A out line
+  if ! command -v python3 > /dev/null 2>&1; then
+    printf 'unknown Python 3 is required for DNS address validation\n'
+    return 0
+  fi
   qname="${expect%%=*}"
   answer="${expect#*=}"
-  answer="${answer%.}"
   [[ "$answer" == *:* ]] && type=AAAA
   if command -v dig > /dev/null 2>&1; then
     out="$(dig +short +time="$t" +tries=1 -p "$port" -t "$type" "@$host" "$qname" 2>&1)" \
@@ -85,8 +108,11 @@ lab_probe_dns() {
     return 0
   fi
   while IFS= read -r line; do
-    line="${line%.}"
-    if [[ "${line,,}" == "${answer,,}" ]]; then
+    if python3 -c 'import ipaddress, sys
+try:
+    sys.exit(0 if ipaddress.ip_address(sys.argv[1]) == ipaddress.ip_address(sys.argv[2]) else 1)
+except ValueError:
+    sys.exit(1)' "$answer" "$line"; then
       printf 'pass %s answered %s\n' "$qname" "$answer"
       return 0
     fi

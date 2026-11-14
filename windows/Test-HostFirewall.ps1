@@ -10,12 +10,14 @@ $ErrorActionPreference = 'Stop'
     function Get-NetFirewallProfile { param($PolicyStore,$ErrorAction) [pscustomobject]@{DefaultInboundAction='Block'} }
     function Get-NetTCPConnection {
         param($State,$ErrorAction)
-        foreach ($port in @(3389,5985,445,8080)) { [pscustomobject]@{LocalPort=$port;OwningProcess=1} }
+        foreach ($port in $script:HostListeners) { [pscustomobject]@{LocalPort=$port;OwningProcess=1} }
     }
     function Get-NetUDPEndpoint { param($ErrorAction) }
     function Get-CimInstance { param($ClassName,$Filter,$ErrorAction) [pscustomobject]@{ProcessId=1;Name='FixtureService'} }
     function Get-NetFirewallRule {
         param($PolicyStore,$Direction,$Enabled,$Action,$DisplayName,$ErrorAction)
+        if ($script:HostQueryFailure) { throw 'Simulated policy store access failure' }
+        if ($Direction -or $Action -or $Enabled) { throw 'Filtered no-match queries are not supported in this fixture' }
         foreach ($rule in @($script:HostRules.Values)) {
             if ($DisplayName -and $rule.DisplayName -ne $DisplayName) { continue }
             if ($Enabled -and -not $rule.Enabled) { continue }
@@ -25,7 +27,8 @@ $ErrorActionPreference = 'Stop'
     function Export-Clixml { param([Parameter(ValueFromPipeline)]$InputObject,$LiteralPath) process {} }
     function netsh.exe {
         param($Context,$Verb,$File)
-        if ($Verb -ne 'export') { throw 'Unexpected rollback in test' }
+        if ($Verb -eq 'import') { $script:HostImports++; $global:LASTEXITCODE=0; return }
+        if ($Verb -ne 'export') { throw 'Unexpected netsh verb in test' }
         Set-Content -LiteralPath $File -Value 'synthetic snapshot'
         $global:LASTEXITCODE=0
     }
@@ -36,7 +39,7 @@ $ErrorActionPreference = 'Stop'
     function Set-NetFirewallProfile { param($Name,$DefaultInboundAction,$Enabled,$ErrorAction) }
     function New-NetFirewallRule {
         param($PolicyStore,$DisplayName,$Direction,$Action,$Enabled,$Protocol,$LocalPort,$RemoteAddress,$Profile)
-        $rule=[pscustomobject]@{Name=$DisplayName;DisplayName=$DisplayName;Enabled=$true;RemoteAddress=@($RemoteAddress);PolicyStoreSourceType='Local'}
+        $rule=[pscustomobject]@{Name=$DisplayName;DisplayName=$DisplayName;Enabled=$true;Direction=$Direction;Action=$Action;RemoteAddress=@($RemoteAddress);PolicyStoreSourceType='Local'}
         $script:HostRules[$DisplayName]=$rule
         $rule
     }
@@ -44,12 +47,27 @@ $ErrorActionPreference = 'Stop'
     function Get-NetFirewallPortFilter { param($AssociatedNetFirewallRule) $AssociatedNetFirewallRule }
     function Set-NetFirewallPortFilter { param($InputObject,$Protocol,$LocalPort) }
     function Get-NetFirewallAddressFilter { param($AssociatedNetFirewallRule,$ErrorAction) $AssociatedNetFirewallRule }
-    function Set-NetFirewallAddressFilter { param($InputObject,$RemoteAddress) $InputObject.RemoteAddress=@($RemoteAddress) }
+    function Set-NetFirewallAddressFilter {
+        param($InputObject,$RemoteAddress)
+        $InputObject.RemoteAddress = @(switch ($script:HostReadback) {
+            'mask' { '10.2.0.0/255.255.0.0' }
+            'cidr' { '10.2.0.0/16' }
+            'ipv6' { '2001:db8:0:1::/64' }
+            'host' { '10.2.3.4/32' }
+            'wrong' { '10.0.0.0/8' }
+            default { $RemoteAddress }
+        })
+    }
     try {
-        foreach ($case in @('default','range-only','management','system','disable','whatif','missing-range')) {
+        foreach ($case in @('default','range-only','management','system','disable','whatif','missing-range',
+            'inactive','empty','query-error','mask-readback','mask-input','ipv6-readback','host-readback','wrong-readback','invalid-mask')) {
+            $script:HostListeners=@(3389,5985,445,8080)
+            $script:HostQueryFailure=$false
+            $script:HostImports=0
+            $script:HostReadback=''
             $script:HostRules=@{}
             foreach ($pair in @(@('Site-Service','Any'),@('CCDC-Host-RDP-3389','10.1.0.0/16'))) {
-                $script:HostRules[$pair[0]]=[pscustomobject]@{Name=$pair[0];DisplayName=$pair[0];Enabled=$true;RemoteAddress=@($pair[1]);PolicyStoreSourceType='Local'}
+                $script:HostRules[$pair[0]]=[pscustomobject]@{Name=$pair[0];DisplayName=$pair[0];Enabled=$true;Direction='Inbound';Action='Allow';RemoteAddress=@($pair[1]);PolicyStoreSourceType='Local'}
             }
             $script:HostMessages=[System.Collections.Generic.List[string]]::new()
             $script:HostDisabled=[System.Collections.Generic.List[string]]::new()
@@ -60,13 +78,61 @@ $ErrorActionPreference = 'Stop'
             if ($case -eq 'disable') { $args.DisableExistingInboundAllows=$true }
             if ($case -eq 'whatif') { $args.WhatIf=$true; $args.DisableExistingInboundAllows=$true }
             if ($case -eq 'missing-range') { $args.ScopeManagementPorts=$true }
+            if ($case -eq 'inactive') {
+                $script:HostListeners=@()
+                foreach ($name in @('CCDC-Host-WinRM-5985','CCDC-Host-WinRM-5986','CCDC-Detected-TCP-445','CCDC-Detected-UDP-137','CCDC-Detected-TCP-50000','CCDC-Detected-TCP-60000')) {
+                    $script:HostRules[$name]=[pscustomobject]@{Name=$name;DisplayName=$name;Enabled=($name -notlike '*60000');Direction='Inbound';Action='Allow';RemoteAddress=@('Any');PolicyStoreSourceType='Local'}
+                }
+                $args.ScopeManagementPorts=$true; $args.ScopeSystemPorts=$true; $args.ManagementRange=@('10.2.0.0/16')
+            }
+            if ($case -eq 'empty') { $script:HostRules=@{} }
+            if ($case -eq 'query-error') { $script:HostQueryFailure=$true }
+            if ($case -in @('mask-readback','mask-input','ipv6-readback','host-readback','wrong-readback','invalid-mask')) {
+                $args.ScopeManagementPorts=$true; $args.ManagementRange=@('10.2.0.0/16')
+                switch ($case) {
+                    'mask-readback' { $script:HostReadback='mask' }
+                    'mask-input' { $script:HostReadback='cidr'; $args.ManagementRange=@('10.2.0.0/255.255.0.0') }
+                    'ipv6-readback' { $script:HostReadback='ipv6'; $args.ManagementRange=@('2001:0db8:0:1::25/64') }
+                    'host-readback' { $script:HostReadback='host'; $args.ManagementRange=@('10.2.3.4') }
+                    'wrong-readback' { $script:HostReadback='wrong' }
+                    'invalid-mask' { $args.ManagementRange=@('10.2.0.0/255.0.255.0') }
+                }
+            }
             $failed=$false
             try { Set-CCDCWindowsFirewall @args }
-            catch { if ($case -ne 'missing-range') { throw }; $failed=$_.Exception.Message -like '*requires -ManagementRange*' }
+            catch {
+                $message=$_.Exception.Message
+                switch ($case) {
+                    'missing-range' { $failed=$message -like '*requires -ManagementRange*' }
+                    'query-error' { $failed=$message -like '*policy store access failure*' }
+                    'wrong-readback' { $failed=$message -like '*Source scope verification failed*restored from*' }
+                    'invalid-mask' { $failed=$message -like '*Noncontiguous firewall mask*' }
+                    default { throw }
+                }
+            }
             if ($case -eq 'missing-range') {
                 if (-not $failed -or $script:HostDisabled.Count) { throw 'Missing range did not fail before writes.' }
             } elseif ($case -eq 'whatif') {
                 if ($script:HostDisabled.Count -or $script:HostRules.Count -ne 2) { throw 'WhatIf mutated policy.' }
+            } elseif ($case -in @('query-error','invalid-mask')) {
+                if (-not $failed -or $script:HostImports -or $script:HostDisabled.Count -or $script:HostRules.Count -ne 2) { throw 'Invalid input or store failure did not stop before changes.' }
+            } elseif ($case -eq 'wrong-readback') {
+                if (-not $failed -or $script:HostImports -ne 1) { throw 'Genuinely different readback did not trigger backup recovery.' }
+            } elseif ($case -eq 'empty') {
+                if ($script:HostRules.Count -ne 4 -or $script:HostImports) { throw 'An empty allow set prevented discovered rules from being created.' }
+            } elseif ($case -eq 'inactive') {
+                foreach ($name in @('CCDC-Host-RDP-3389','CCDC-Host-WinRM-5985','CCDC-Host-WinRM-5986','CCDC-Detected-TCP-445','CCDC-Detected-UDP-137','CCDC-Detected-TCP-50000')) {
+                    if ("$($script:HostRules[$name].RemoteAddress)" -ne '10.2.0.0/16' -or
+                        -not @($script:HostMessages | Where-Object { $_ -like "*scoped-rule summary*$name remote=10.2.0.0/16*" }).Count) {
+                        throw "Inactive helper was not scoped and summarized: $name"
+                    }
+                }
+                if ($script:HostRules['CCDC-Detected-TCP-60000'].Enabled -or
+                    "$($script:HostRules['Site-Service'].RemoteAddress)" -ne 'Any') { throw 'Inactive scoping enabled a disabled rule or narrowed unrelated rules.' }
+            } elseif ($case -in @('mask-readback','mask-input','ipv6-readback','host-readback')) {
+                if ($script:HostImports -or -not @($script:HostMessages | Where-Object { $_ -like '*scoped-rule summary*CCDC-Host-RDP-3389*' }).Count) {
+                    throw 'Equivalent address forms failed verification.'
+                }
             } else {
                 $rdp=$script:HostRules['CCDC-Host-RDP-3389']
                 $winrm=$script:HostRules['CCDC-Host-WinRM-5985']
@@ -85,7 +151,7 @@ $ErrorActionPreference = 'Stop'
             Write-Host "PASS host firewall $case"
         }
     } finally {
-        Remove-Variable HostRules,HostMessages,HostDisabled -Scope Script -ErrorAction SilentlyContinue
+        Remove-Variable HostRules,HostMessages,HostDisabled,HostListeners,HostQueryFailure,HostImports,HostReadback -Scope Script -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $fixture -Recurse -Force
     }
 }

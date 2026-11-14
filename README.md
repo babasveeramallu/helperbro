@@ -586,6 +586,12 @@ These apply by default when selected. Add `-PlanOnly` to preview. Each change is
 | `-ScopeSystemPorts` | Opt-in with `-EnforceHostFirewall` and explicit `-ManagementRange`. Scope helper-created SMB/RPC/system rules (135, 137-139, 445, 5040, 5050, 5353, 7680, 1900, 3702 and 49152+). Off by default. | File sharing, domain/RPC and other checks outside the ranges may fail if no other allow applies. |
 | `-DisableExistingInboundAllows` | Opt-in with `-EnforceHostFirewall`. Disable all enabled local inbound allow rules before constructing discovered-service allows. Existing rules are reported beforehand and every disabled rule is logged and summarized. Off by default. | Temporarily inactive services or unmapped listeners can lose access. GPO rules are not disabled. |
 
+Explicit scoping also revisits enabled matching helper rules when their services
+are not listening; disabled helpers are not re-enabled solely for scoping.
+Scope verification compares network addresses and prefix lengths, accepting
+equivalent IPv4 CIDR/netmask and IPv6 spellings rather than requiring identical
+provider strings. Other broader allows can still permit access.
+
 `auto-harden.ps1` enables `-RequireSmbSigning` and `-DisableSpooler` on every role,
 but never opts into firewall rule disabling or port scoping. Use `-KeepSpooler`
 to skip the Spooler change.

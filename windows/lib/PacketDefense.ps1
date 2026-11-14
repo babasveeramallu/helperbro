@@ -4,6 +4,16 @@ function Test-PacketAdministrator {
         [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-PacketLocalFirewallRule {
+    param([Parameter(Mandatory)][string]$Name)
+    try {
+        Get-NetFirewallRule -PolicyStore PersistentStore -Name $Name -ErrorAction Stop
+    } catch {
+        if ($_.CategoryInfo.Category -ne 'ObjectNotFound' -or
+            $_.FullyQualifiedErrorId -notlike 'CmdletizationQuery_NotFound_InstanceID,*') { throw }
+    }
+}
+
 function Assert-PacketLocalPath {
     param([string]$Path)
     if ($Path -notmatch '^[A-Za-z]:\\' -or $Path -match '["\r\n]') {

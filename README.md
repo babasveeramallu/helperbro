@@ -81,7 +81,8 @@ generic management-only firewall assumptions.
 
 Apply one host at a time after review, then perform external scoring/admin/Splunk
 checks and run the printed commit command **before the default 10-minute
-deadline**. Otherwise the SYSTEM task attempts to restore the pre-change policy.
+deadline**. Otherwise the SYSTEM task attempts to remove that run's rules and
+restore the local profile fields it changed, without importing the full snapshot.
 Existing broad inbound allows remain: this is not a strict allowlist. AD retains
 the standard dynamic RPC range. Outbound default stays Allow.
 

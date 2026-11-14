@@ -58,7 +58,14 @@ function Set-CCDCWindowsFirewall {
         if ($service) { [pscustomobject]@{ Protocol=$listener.Protocol; Port=$listener.Port; Service=$service.Name; PID=$listener.PID } }
         else { Write-Log FLAG "Listener $($listener.Protocol)/$($listener.Port) PID=$($listener.PID) has no mapped running service; not auto-allowed." }
     })
-    foreach ($special in @(@{Port=3389;Service='TermService'},@{Port=5985;Service='WinRM'},@{Port=5986;Service='WinRM'})) {
+    # Kernel-owned listeners (PID 4: http.sys and the SMB server) never map to a service process,
+    # so map the well-known ones to the service that serves them: RDP, WinRM, IIS and the SMB server.
+    $kernelServices = @(
+        @{Port=3389;Service='TermService'},@{Port=5985;Service='WinRM'},@{Port=5986;Service='WinRM'},
+        @{Port=80;Service='W3SVC'},@{Port=443;Service='W3SVC'},
+        @{Port=445;Service='LanmanServer'},@{Port=139;Service='LanmanServer'}
+    )
+    foreach ($special in $kernelServices) {
         $hasListener = @($listeners | Where-Object { $_.Protocol -eq 'TCP' -and $_.Port -eq $special.Port }).Count -gt 0
         $service = $serviceMap | Where-Object Name -eq $special.Service | Select-Object -First 1
         if ($hasListener -and $service -and -not (@($detected | Where-Object { $_.Protocol -eq 'TCP' -and $_.Port -eq $special.Port }).Count)) {

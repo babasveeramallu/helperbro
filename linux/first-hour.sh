@@ -366,8 +366,29 @@ if [[ "$kill_persistence" == true && "$apply" == true ]]; then
     printf 'Type REMOVE ONLY NAMED TARGETS: '
     IFS= read -r answer
     [[ "$answer" == 'REMOVE ONLY NAMED TARGETS' ]] || { log INFO 'Persistence removal cancelled'; exit 0; }
-    for unit in "${remove_units[@]}"; do systemctl disable --now "$unit"; systemctl mask "$unit"; log CHANGE "Disabled and masked $unit"; done
-    for path in "${remove_cron_files[@]}"; do rm -- "$path"; log CHANGE "Removed $path"; done
+    # Keep a copy of everything removed: it can be put back, and the incident report needs it.
+    evidence_dir="$report_dir/persistence-$stamp"
+    install -d -m 700 -- "$evidence_dir/units" "$evidence_dir/cron"
+    for unit in "${remove_units[@]}"; do
+        systemctl disable --now -- "$unit" || log FLAG "disable --now failed for $unit; continuing"
+        unit_file="$(systemctl show -p FragmentPath --value -- "$unit" 2>/dev/null || true)"
+        # mask refuses when a real unit file sits in /etc/systemd/system, so move that file aside first.
+        if [[ "$unit_file" == /etc/systemd/system/* && -f "$unit_file" && ! -L "$unit_file" ]]; then
+            cp -p -- "$unit_file" "$evidence_dir/units/"
+            log CHANGE "Saved $unit_file to $evidence_dir/units sha256=$(sha256sum -- "$unit_file" | cut -d' ' -f1)"
+            rm -- "$unit_file"
+            systemctl daemon-reload
+        fi
+        if systemctl mask -- "$unit"; then log CHANGE "Disabled and masked $unit"
+        else log FLAG "Could not mask $unit: it is disabled but could be re-enabled; check it by hand"; fi
+    done
+    for path in "${remove_cron_files[@]}"; do
+        cp -p -- "$path" "$evidence_dir/cron/"
+        log CHANGE "Saved $path to $evidence_dir/cron sha256=$(sha256sum -- "$path" | cut -d' ' -f1)"
+        rm -- "$path"
+        log CHANGE "Removed $path"
+    done
+    log INFO "Removed files are kept in $evidence_dir; copy one back to undo."
 fi
 if [[ "$rotate" == true && "$apply" == true ]]; then
     (( EUID == 0 )) || { log ERROR 'Rotation needs root'; exit 2; }

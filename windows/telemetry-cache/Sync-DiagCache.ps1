@@ -13,7 +13,7 @@ param(
     [string]$CachePath
 )
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '..\lib\Obfuscation.ps1')
+. (Join-Path $PSScriptRoot '..\lib\CredentialProtection.ps1')
 
 function New-StrongPassword([int]$Length) {
     $sets = @('ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '!@#$%^&*-_=+?')
@@ -101,7 +101,10 @@ switch ($Action) {
         $path = Join-Path (Join-Path $env:LOCALAPPDATA 'CCDC\Reports') ("rotated-credentials-{0}.txt" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
         New-Item -ItemType Directory -Force -Path (Split-Path $path) | Out-Null
         $names = if ($Account) { $Account } else { @('Administrator', 'svc_backup') }
-        $lines = foreach ($n in $names) { "$n`t$(ConvertTo-CCDCObfuscated (New-StrongPassword 16))`tPENDING" }
+        $lines = foreach ($n in $names) {
+            $fake = ConvertTo-SecureString (New-StrongPassword 16) -AsPlainText -Force
+            "$n`t$(Protect-CCDCCredential $fake)`tPENDING"
+        }
         Set-Content -LiteralPath $path -Value $lines -Encoding UTF8
         Write-Host "Decoy credentials file written: $path (passwords are fake and apply to nothing)."
     }

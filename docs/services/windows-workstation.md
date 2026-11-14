@@ -29,9 +29,15 @@ and expose sensitive command lines in logs. Restore points are not guaranteed.
 Use the firewall playbook's timer if a firewall change is authorized. For
 forwarding, follow [Splunk](splunk.md) with role `Wkst`.
 
-Timed firewall rollback imports the entire exported firewall policy and may
-overwrite changes made after the snapshot. Coordinate other firewall changes
-while the timer is active.
+New packet-firewall runs roll back only their own rules and changed local profile
+fields. Coordinate changes to those same profile fields while the timer is
+active; a conflicting change can prevent automatic recovery. Older pending runs
+use their saved recovery scripts and can still import the entire snapshot.
+If an original local field was `NotConfigured`, recovery skips that unsupported
+write, restores supported fields and removes run-specific rules, but reports
+failure and keeps the run pending with its watchdog registered. The skipped
+fields retain the applied values; coordinate manual recovery from the console
+using the [recovery limits](../../windows/DEFENSE-PLAYBOOK.md).
 
 Before and after: test the intended user login, DNS, access to the assigned
 management interfaces and a new forwarded event. Confirm DHCP and routes

@@ -93,6 +93,13 @@ function Get-NetFirewallRule {
         if ($Direction -and $r.Direction -ne $Direction) { continue }
         $r
     })
+    if ($Name -and -not $matched.Count) {
+        $global:DefenseFixture.MissingRuleQueries++
+        throw [Management.Automation.ErrorRecord]::new(
+            [Microsoft.PowerShell.Cmdletization.Cim.CimJobException]::new('No matching MSFT_NetFirewallRule objects found'),
+            'CmdletizationQuery_NotFound_InstanceID,Get-NetFirewallRule',
+            [Management.Automation.ErrorCategory]::ObjectNotFound, $Name)
+    }
     if ($Action -and -not $matched.Count -and $ErrorAction -eq 'Stop') {
         throw 'No matching MSFT_NetFirewallRule objects found'
     }
@@ -132,6 +139,10 @@ function New-NetFirewallRule {
 function Set-NetFirewallProfile {
     param($PolicyStore,$Name,$Enabled,$DefaultInboundAction,$DefaultOutboundAction,$ErrorAction)
     if ($global:DefenseFixture.FailProfile) { throw 'Simulated profile failure' }
+    if ($PolicyStore -eq 'PersistentStore' -and @('Enabled','DefaultInboundAction','DefaultOutboundAction' |
+        Where-Object { $PSBoundParameters.ContainsKey($_) -and $PSBoundParameters[$_] -eq 'NotConfigured' }).Count) {
+        throw 'NotConfigured writes to PersistentStore are unsupported in this fixture'
+    }
     foreach ($profileName in $Name) {
         $profile = $global:DefenseFixture.Profiles[$profileName]
         if ($PSBoundParameters.ContainsKey('Enabled')) { $profile.Enabled = "$Enabled" }
@@ -181,10 +192,10 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
         Root=$fixture; Rules=@{'Existing-Admin'=$unowned}; Tasks=@{}
         Profiles=@{
             Domain=@{Enabled='False';Inbound='Allow';Outbound='Block';LogBlocked='False'}
-            Private=@{Enabled='NotConfigured';Inbound='NotConfigured';Outbound='NotConfigured'}
+            Private=@{Enabled='False';Inbound='Allow';Outbound='Block'}
             Public=@{Enabled='True';Inbound='Block';Outbound='Allow'}
         }
-        Imports=0; FailCreateAt=0; CreateCount=0; FailRemoveAt=0; RemoveCount=0; FailRuleQuery=$false; FailProfile=$false; ProfileChangeOnCreateFailure=$false; BadTask=$false
+        Imports=0; MissingRuleQueries=0; FailCreateAt=0; CreateCount=0; FailRemoveAt=0; RemoveCount=0; FailRuleQuery=$false; FailProfile=$false; ProfileChangeOnCreateFailure=$false; BadTask=$false
     }
     $before=@(Get-ChildItem $fixture -Recurse).Count
     & "$fixture\Start-WindowsDecoy.ps1" -AuditOnly
@@ -217,7 +228,8 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
     Assert-Defense (@($state.RuleNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq 0) 'Revert removes all run-specific rules'
     Assert-Defense ($global:DefenseFixture.Profiles.Domain.Enabled -eq 'False' -and $global:DefenseFixture.Profiles.Domain.Inbound -eq 'Allow' -and $global:DefenseFixture.Profiles.Domain.Outbound -eq 'Block') 'Revert restores distinct Domain profile values'
     Assert-Defense ($global:DefenseFixture.Profiles.Domain.LogBlocked -eq 'True') 'Revert preserves unrelated profile settings'
-    Assert-Defense ($global:DefenseFixture.Profiles.Private.Enabled -eq 'NotConfigured' -and $global:DefenseFixture.Profiles.Private.Inbound -eq 'NotConfigured' -and $global:DefenseFixture.Profiles.Private.Outbound -eq 'NotConfigured') 'Revert restores NotConfigured local profile values'
+    Assert-Defense ($global:DefenseFixture.Profiles.Private.Enabled -eq 'False' -and $global:DefenseFixture.Profiles.Private.Inbound -eq 'Allow' -and $global:DefenseFixture.Profiles.Private.Outbound -eq 'Block') 'Revert restores explicit Private profile values'
+    Assert-Defense ($global:DefenseFixture.MissingRuleQueries -gt 0) 'Apply and revert suppress representative missing-name ObjectNotFound errors'
     Assert-Defense ($global:DefenseFixture.Profiles.Public.Enabled -eq 'True' -and $global:DefenseFixture.Profiles.Public.Inbound -eq 'Block' -and $global:DefenseFixture.Profiles.Public.Outbound -eq 'Allow') 'Revert preserves unchanged profile values'
 
     & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
@@ -351,6 +363,32 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
     Assert-Defense $rejected 'Unready watchdog blocks apply'
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Unready unused watchdog is removed'
     $global:DefenseFixture.BadTask=$false
+
+    $global:DefenseFixture.Profiles.Private=@{Enabled='NotConfigured';Inbound='NotConfigured';Outbound='NotConfigured'}
+    $global:DefenseFixture.Profiles.Domain=@{Enabled='False';Inbound='Allow';Outbound='Block'}
+    & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
+    $pending = Get-ChildItem "$fixture\runs" -Directory | Where-Object { (Get-Content "$($_.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Pending' }
+    $newNames = @((Get-Content "$($pending.FullName)\state.json" -Raw | ConvertFrom-Json).RuleNames)
+    foreach ($attempt in 1..2) {
+        $failure = ''
+        try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force }
+        catch { $failure = $_.Exception.Message }
+        Assert-Defense ($failure -like '*cannot restore NotConfigured in PersistentStore*' -and
+            $failure -like '*Private.Enabled*' -and $failure -like '*Private.DefaultInboundAction*' -and
+            $failure -like '*Private.DefaultOutboundAction*') "Unsupported restore reports every affected field on attempt $attempt"
+        Assert-Defense (@($newNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq 0) "Unsupported restore still removes run rules on attempt $attempt"
+        Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 1 -and
+            (Get-Content "$($pending.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Pending') "Incomplete recovery retains pending state and watchdog on attempt $attempt"
+    }
+    Assert-Defense ($global:DefenseFixture.Profiles.Domain.Enabled -eq 'False' -and
+        $global:DefenseFixture.Profiles.Domain.Inbound -eq 'Allow' -and
+        $global:DefenseFixture.Profiles.Domain.Outbound -eq 'Block') 'Unsupported fields do not prevent supported profile restores'
+    Assert-Defense ($global:DefenseFixture.Profiles.Private.Enabled -eq 'True' -and
+        $global:DefenseFixture.Profiles.Private.Inbound -eq 'Block' -and
+        $global:DefenseFixture.Profiles.Private.Outbound -eq 'Allow') 'Unsupported fields remain at applied values without an unsafe substitute'
+    Assert-Defense ($global:DefenseFixture.Rules.ContainsKey('Teammate-Service') -and
+        @($committedNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq $committedNames.Count -and
+        $global:DefenseFixture.Imports -eq 0) 'Incomplete recovery preserves teammate and committed rules without full import'
 
     # Loopback sockets only: no services, event-source registrations or firewall
     # changes. The worker emits objects instead of writing to Windows Event Log.

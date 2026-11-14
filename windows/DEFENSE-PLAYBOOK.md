@@ -265,6 +265,16 @@ Other rules and profile fields are left alone. If a changed field has since
 been set to a third value, rollback refuses to overwrite it and leaves the
 task registered for retry; investigate promptly from the console. Coordinate
 edits to those same fields: checks and writes are not atomic with other tools.
+
+Microsoft documents `NotConfigured` writes for these fields as GPO-only
+([Set-NetFirewallProfile](https://learn.microsoft.com/en-us/powershell/module/netsecurity/set-netfirewallprofile)).
+If a saved local field was `NotConfigured`, recovery does not submit that value
+to `PersistentStore` or guess a replacement. It restores supported fields and
+removes the run's rules, then fails with the affected profile/field names.
+Those fields remain at the applied values; the state stays `Pending` and the
+watchdog stays registered. Repeated retries cannot resolve this limitation.
+Inspect the saved state and actual policy from the console and coordinate manual
+recovery; do not assume the previous defaults or connectivity have been restored.
 Rollback cannot override centrally enforced GPO policy. Apply errors trigger an
 immediate rollback attempt; if that fails, the scheduled task remains the
 fallback, subject to its retry limit. Inspect failures rather than assuming

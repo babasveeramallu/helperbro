@@ -83,6 +83,9 @@ Apply one host at a time after review, then perform external scoring/admin/Splun
 checks and run the printed commit command **before the default 10-minute
 deadline**. Otherwise the SYSTEM task attempts to remove that run's rules and
 restore the local profile fields it changed, without importing the full snapshot.
+Local fields originally `NotConfigured` cannot be safely restored through this
+path: run rules are still removed, but recovery reports failure and keeps the
+run pending for manual recovery. See the [recovery limits](windows/DEFENSE-PLAYBOOK.md).
 Existing broad inbound allows remain: this is not a strict allowlist. AD retains
 the standard dynamic RPC range. Outbound default stays Allow.
 

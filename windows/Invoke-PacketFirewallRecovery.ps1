@@ -72,6 +72,7 @@ try {
         }
         $target = @{ Enabled='True'; DefaultInboundAction='Block'; DefaultOutboundAction='Allow' }
         $profileApplyStarted = Test-Path -LiteralPath (Join-Path $RunDirectory 'profile-apply-started') -PathType Leaf -ErrorAction Stop
+        $unrestorable = New-Object 'System.Collections.Generic.List[string]'
         $restores = @(foreach ($profile in $original) {
             $now = $current | Where-Object Name -eq $profile.Name
             $parameters = @{ PolicyStore='PersistentStore'; Name=$profile.Name; ErrorAction='Stop' }
@@ -82,6 +83,11 @@ try {
                 if ($before -eq $target[$field] -or $actual -eq $before) { continue }
                 if ($actual -ne $target[$field]) {
                     throw "Firewall profile $($profile.Name) $field changed independently; rollback remains armed. Coordinate manual recovery."
+                }
+                if ($before -eq 'NotConfigured') {
+                    # NotConfigured writes are documented only for GPOs, not PersistentStore.
+                    $unrestorable.Add("$($profile.Name).$field")
+                    continue
                 }
                 $parameters[$field] = $before
             }
@@ -117,6 +123,9 @@ try {
             if (@(Get-PacketLocalFirewallRule -Name $name).Count) {
                 throw "Failed to remove run-specific rule $name; rollback remains armed."
             }
+        }
+        if ($unrestorable.Count) {
+            throw "Run-specific rules removed, but cannot restore NotConfigured in PersistentStore for: $($unrestorable -join ', '). These fields remain at the applied values. Recovery is incomplete; state remains Pending and rollback remains armed. Coordinate manual recovery from the console."
         }
         $state.Status = 'Reverted'
     }

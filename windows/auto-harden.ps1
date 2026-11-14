@@ -70,7 +70,8 @@ if (-not $SkipFirewall) {
     if ($ManagementRange.Count -eq 0) { $ManagementRange = @(Get-LocalSubnets | Select-Object -Unique) }
     if ($ManagementRange.Count -gt 0) {
         $firstHour += '-EnforceHostFirewall'
-        foreach ($range in $ManagementRange) { $firstHour += @('-ManagementRange', $range) }
+        # One parameter, comma-separated: repeating -ManagementRange is a binding error in PowerShell.
+        $firstHour += @('-ManagementRange', ($ManagementRange -join ','))
         Write-Step 'Firewall preserves existing allows and scopes; no narrowing switches are enabled.'
     } else { Write-Warning 'No usable local subnet found; firewall step skipped.' }
 }

@@ -81,6 +81,8 @@ try {
     if (($ScopeManagementPorts -or $ScopeSystemPorts -or $DisableExistingInboundAllows) -and -not $EnforceHostFirewall) {
         throw 'Firewall narrowing switches require -EnforceHostFirewall.'
     }
+    # Accept 'a,b' as well as an array, so callers that build a command line can pass one argument.
+    $ManagementRange = @($ManagementRange | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($EnforceHostFirewall) {
         if (($ScopeManagementPorts -or $ScopeSystemPorts) -and $ManagementRange.Count -eq 0) { throw 'Port scoping requires -ManagementRange CIDR(s); no firewall changes made.' }
         foreach ($range in $ManagementRange) {

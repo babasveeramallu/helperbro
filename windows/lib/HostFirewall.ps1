@@ -34,6 +34,17 @@ function ConvertTo-CCDCFirewallNetwork {
     "$([Net.IPAddress]::new($bytes))/$prefix"
 }
 
+function Get-CCDCFirewallRuleProtocol {
+    param([Parameter(Mandatory)]$Rule)
+    $filters = @(Get-NetFirewallPortFilter -AssociatedNetFirewallRule $Rule -ErrorAction Stop)
+    if ($filters.Count -ne 1) { throw "Cannot inspect helper rule protocol: $($Rule.Name)" }
+    switch ("$($filters[0].Protocol)") {
+        { $_ -in @('TCP','6') } { 'TCP'; break }
+        { $_ -in @('UDP','17') } { 'UDP'; break }
+        default { throw "Unsupported helper rule protocol: $($Rule.Name)" }
+    }
+}
+
 function Set-CCDCWindowsFirewall {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
@@ -58,15 +69,16 @@ function Set-CCDCWindowsFirewall {
         if ($service) { [pscustomobject]@{ Protocol=$listener.Protocol; Port=$listener.Port; Service=$service.Name; PID=$listener.PID } }
         else { Write-Log FLAG "Listener $($listener.Protocol)/$($listener.Port) PID=$($listener.PID) has no mapped running service; not auto-allowed." }
     })
-    # Kernel-owned listeners (PID 4: http.sys and the SMB server) never map to a service process,
-    # so map the well-known ones to the service that serves them: RDP, WinRM, IIS and the SMB server.
+    # IIS/http.sys and SMB listen as PID 4 rather than their service process.
     $kernelServices = @(
         @{Port=3389;Service='TermService'},@{Port=5985;Service='WinRM'},@{Port=5986;Service='WinRM'},
-        @{Port=80;Service='W3SVC'},@{Port=443;Service='W3SVC'},
-        @{Port=445;Service='LanmanServer'},@{Port=139;Service='LanmanServer'}
+        @{Port=80;Service='W3SVC';KernelOnly=$true},@{Port=443;Service='W3SVC';KernelOnly=$true},
+        @{Port=445;Service='LanmanServer';KernelOnly=$true},@{Port=139;Service='LanmanServer';KernelOnly=$true}
     )
     foreach ($special in $kernelServices) {
-        $hasListener = @($listeners | Where-Object { $_.Protocol -eq 'TCP' -and $_.Port -eq $special.Port }).Count -gt 0
+        $hasListener = @($listeners | Where-Object {
+            $_.Protocol -eq 'TCP' -and $_.Port -eq $special.Port -and (-not $special.KernelOnly -or $_.PID -eq 4)
+        }).Count -gt 0
         $service = $serviceMap | Where-Object Name -eq $special.Service | Select-Object -First 1
         if ($hasListener -and $service -and -not (@($detected | Where-Object { $_.Protocol -eq 'TCP' -and $_.Port -eq $special.Port }).Count)) {
             $detected += [pscustomobject]@{ Protocol='TCP'; Port=$special.Port; Service=$special.Service; PID=$service.ProcessId }
@@ -82,8 +94,9 @@ function Set-CCDCWindowsFirewall {
     foreach ($rule in $localAllows) {
         $port = 0
         $protocol = 'TCP'
-        if ($ScopeManagementPorts -and $rule.DisplayName -match '^CCDC-Host-(RDP-3389|WinRM-598[56])$') {
+        if ($ScopeManagementPorts -and $rule.DisplayName -match '^CCDC-Host-(RDP-((TCP|UDP)-)?3389|WinRM-((TCP|UDP)-)?598[56])$') {
             $port = [int]($rule.DisplayName.Split('-')[-1])
+            $protocol = Get-CCDCFirewallRuleProtocol $rule
         } elseif ($ScopeSystemPorts -and $rule.DisplayName -match '^CCDC-Detected-(TCP|UDP)-([0-9]{1,5})$') {
             $protocol = $Matches[1]
             $candidate = [int]$Matches[2]
@@ -121,37 +134,51 @@ function Set-CCDCWindowsFirewall {
             Set-NetFirewallProfile -Name Domain,Private,Public -DefaultInboundAction Block -Enabled True -ErrorAction Stop
             foreach ($entry in $detected) {
                 $name = switch ($entry.Port) {
-                    3389 { "CCDC-Host-RDP-$($entry.Port)"; break }
-                    { $_ -in @(5985,5986) } { "CCDC-Host-WinRM-$($entry.Port)"; break }
+                    3389 { "CCDC-Host-RDP-$($entry.Protocol)-$($entry.Port)"; break }
+                    { $_ -in @(5985,5986) } { "CCDC-Host-WinRM-$($entry.Protocol)-$($entry.Port)"; break }
                     default { "CCDC-Detected-$($entry.Protocol)-$($entry.Port)" }
                 }
                 $systemPort = $ScopeSystemPorts -and $entry.Port -in $systemPorts -or ($ScopeSystemPorts -and $entry.Port -ge 49152)
                 $scoped = ($ScopeManagementPorts -and $entry.Port -in @(3389,5985,5986)) -or $systemPort
                 $remote = if ($scoped) { $ManagementRange } else { 'Any' }
-                $existingRule = $localRules | Where-Object DisplayName -eq $name
-                if ($existingRule -and -not $scoped -and -not $DisableExistingInboundAllows) {
-                    Write-Log INFO "Preserved existing helper rule and scope: $name"
-                    continue
+                $existingRules = @($localRules | Where-Object DisplayName -eq $name)
+                $legacyName = switch ($entry.Port) {
+                    3389 { 'CCDC-Host-RDP-3389'; break }
+                    { $_ -in @(5985,5986) } { "CCDC-Host-WinRM-$($entry.Port)"; break }
                 }
-                if (-not $existingRule) {
-                    $existingRule = New-NetFirewallRule -PolicyStore PersistentStore -DisplayName $name -Direction Inbound -Action Allow -Enabled True -Protocol $entry.Protocol -LocalPort $entry.Port -RemoteAddress $remote -Profile Domain,Private,Public
-                    $localRules += $existingRule
-                } else {
-                    Set-NetFirewallRule -InputObject $existingRule -Enabled True -Action Allow -Profile Domain,Private,Public
-                    $portFilter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $existingRule
-                    Set-NetFirewallPortFilter -InputObject $portFilter -Protocol $entry.Protocol -LocalPort $entry.Port
+                # Legacy names omitted protocol; never repurpose one protocol's rule for another.
+                if ($legacyName) {
+                    $existingRules += @($localRules | Where-Object {
+                        $_.DisplayName -eq $legacyName -and (Get-CCDCFirewallRuleProtocol $_) -eq $entry.Protocol
+                    })
                 }
-                $addressFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule
-                Set-NetFirewallAddressFilter -InputObject $addressFilter -RemoteAddress $remote
-                if ($scoped) {
-                    $actual = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule -ErrorAction Stop).RemoteAddress)
-                    $actualNetworks = @($actual | ForEach-Object { ConvertTo-CCDCFirewallNetwork $_ } | Sort-Object -Unique)
-                    if (-not $actualNetworks.Count -or (Compare-Object $managementNetworks $actualNetworks)) {
-                        throw "Source scope verification failed for $name."
+                $created = -not $existingRules.Count
+                if ($created) {
+                    $existingRules = @(New-NetFirewallRule -PolicyStore PersistentStore -DisplayName $name -Direction Inbound -Action Allow -Enabled True -Protocol $entry.Protocol -LocalPort $entry.Port -RemoteAddress $remote -Profile Domain,Private,Public)
+                    $localRules += $existingRules
+                }
+                foreach ($existingRule in $existingRules) {
+                    if (-not $created -and -not $scoped -and -not $DisableExistingInboundAllows) {
+                        Write-Log INFO "Preserved existing helper rule and scope: $($existingRule.DisplayName)"
+                        continue
                     }
+                    if (-not $created) {
+                        Set-NetFirewallRule -InputObject $existingRule -Enabled True -Action Allow -Profile Domain,Private,Public
+                        $portFilter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $existingRule
+                        Set-NetFirewallPortFilter -InputObject $portFilter -Protocol $entry.Protocol -LocalPort $entry.Port
+                    }
+                    $addressFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule
+                    Set-NetFirewallAddressFilter -InputObject $addressFilter -RemoteAddress $remote
+                    if ($scoped) {
+                        $actual = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule -ErrorAction Stop).RemoteAddress)
+                        $actualNetworks = @($actual | ForEach-Object { ConvertTo-CCDCFirewallNetwork $_ } | Sort-Object -Unique)
+                        if (-not $actualNetworks.Count -or (Compare-Object $managementNetworks $actualNetworks)) {
+                            throw "Source scope verification failed for $name."
+                        }
+                    }
+                    Write-Log CHANGE "Allow $($entry.Protocol)/$($entry.Port) service=$($entry.Service) remote=$($remote -join ',')"
+                    if ($scoped) { $narrowed.Add("$name remote=$($remote -join ',')") }
                 }
-                Write-Log CHANGE "Allow $($entry.Protocol)/$($entry.Port) service=$($entry.Service) remote=$($remote -join ',')"
-                if ($scoped) { $narrowed.Add("$name remote=$($remote -join ',')") }
             }
             $after = Get-NetFirewallProfile
             if (@($after | Where-Object { $_.DefaultInboundAction -ne 'Block' }).Count) { throw 'Firewall default-action verification failed.' }

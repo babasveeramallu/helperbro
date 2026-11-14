@@ -10,10 +10,21 @@ $ErrorActionPreference = 'Stop'
     function Get-NetFirewallProfile { param($PolicyStore,$ErrorAction) [pscustomobject]@{DefaultInboundAction='Block'} }
     function Get-NetTCPConnection {
         param($State,$ErrorAction)
-        foreach ($port in $script:HostListeners) { [pscustomobject]@{LocalPort=$port;OwningProcess=1} }
+        foreach ($port in $script:HostListeners) { [pscustomobject]@{LocalPort=$port;OwningProcess=$script:HostListenerPid} }
     }
-    function Get-NetUDPEndpoint { param($ErrorAction) }
-    function Get-CimInstance { param($ClassName,$Filter,$ErrorAction) [pscustomobject]@{ProcessId=1;Name='FixtureService'} }
+    function Get-NetUDPEndpoint {
+        param($ErrorAction)
+        if ($script:HostUdpListener) { [pscustomobject]@{LocalPort=3389;OwningProcess=1} }
+    }
+    function Get-CimInstance {
+        param($ClassName,$Filter,$ErrorAction)
+        if ($script:HostKernelMode) {
+            if ($script:HostKernelMode -ne 'kernel-no-service') {
+                [pscustomobject]@{ProcessId=501;Name='W3SVC'}
+                [pscustomobject]@{ProcessId=502;Name='LanmanServer'}
+            }
+        } else { [pscustomobject]@{ProcessId=1;Name='FixtureService'} }
+    }
     function Get-NetFirewallRule {
         param($PolicyStore,$Direction,$Enabled,$Action,$DisplayName,$ErrorAction)
         if ($script:HostQueryFailure) { throw 'Simulated policy store access failure' }
@@ -39,13 +50,17 @@ $ErrorActionPreference = 'Stop'
     function Set-NetFirewallProfile { param($Name,$DefaultInboundAction,$Enabled,$ErrorAction) }
     function New-NetFirewallRule {
         param($PolicyStore,$DisplayName,$Direction,$Action,$Enabled,$Protocol,$LocalPort,$RemoteAddress,$Profile)
-        $rule=[pscustomobject]@{Name=$DisplayName;DisplayName=$DisplayName;Enabled=$true;Direction=$Direction;Action=$Action;RemoteAddress=@($RemoteAddress);PolicyStoreSourceType='Local'}
+        $rule=[pscustomobject]@{Name=$DisplayName;DisplayName=$DisplayName;Enabled=$true;Direction=$Direction;Action=$Action;Protocol=$Protocol;LocalPort=$LocalPort;RemoteAddress=@($RemoteAddress);PolicyStoreSourceType='Local'}
         $script:HostRules[$DisplayName]=$rule
         $rule
     }
     function Set-NetFirewallRule { param($InputObject,$Enabled,$Action,$Profile) $InputObject.Enabled=$true }
-    function Get-NetFirewallPortFilter { param($AssociatedNetFirewallRule) $AssociatedNetFirewallRule }
-    function Set-NetFirewallPortFilter { param($InputObject,$Protocol,$LocalPort) }
+    function Get-NetFirewallPortFilter { param($AssociatedNetFirewallRule,$ErrorAction) $AssociatedNetFirewallRule }
+    function Set-NetFirewallPortFilter {
+        param($InputObject,$Protocol,$LocalPort)
+        $InputObject.Protocol=$Protocol
+        $InputObject.LocalPort=$LocalPort
+    }
     function Get-NetFirewallAddressFilter { param($AssociatedNetFirewallRule,$ErrorAction) $AssociatedNetFirewallRule }
     function Set-NetFirewallAddressFilter {
         param($InputObject,$RemoteAddress)
@@ -60,14 +75,19 @@ $ErrorActionPreference = 'Stop'
     }
     try {
         foreach ($case in @('default','range-only','management','system','disable','whatif','missing-range',
-            'inactive','empty','query-error','mask-readback','mask-input','ipv6-readback','host-readback','wrong-readback','invalid-mask')) {
+            'inactive','empty','query-error','mask-readback','mask-input','ipv6-readback','host-readback','wrong-readback','invalid-mask',
+            'dual-protocol','dual-disable','dual-scoped','legacy-udp','fresh-dual',
+            'kernel','kernel-disable','kernel-system','kernel-no-service','kernel-no-listener','kernel-wrong-pid')) {
             $script:HostListeners=@(3389,5985,445,8080)
+            $script:HostListenerPid=1
+            $script:HostKernelMode=''
+            $script:HostUdpListener=$false
             $script:HostQueryFailure=$false
             $script:HostImports=0
             $script:HostReadback=''
             $script:HostRules=@{}
             foreach ($pair in @(@('Site-Service','Any'),@('CCDC-Host-RDP-3389','10.1.0.0/16'))) {
-                $script:HostRules[$pair[0]]=[pscustomobject]@{Name=$pair[0];DisplayName=$pair[0];Enabled=$true;Direction='Inbound';Action='Allow';RemoteAddress=@($pair[1]);PolicyStoreSourceType='Local'}
+                $script:HostRules[$pair[0]]=[pscustomobject]@{Name=$pair[0];DisplayName=$pair[0];Enabled=$true;Direction='Inbound';Action='Allow';Protocol='6';LocalPort=3389;RemoteAddress=@($pair[1]);PolicyStoreSourceType='Local'}
             }
             $script:HostMessages=[System.Collections.Generic.List[string]]::new()
             $script:HostDisabled=[System.Collections.Generic.List[string]]::new()
@@ -80,13 +100,31 @@ $ErrorActionPreference = 'Stop'
             if ($case -eq 'missing-range') { $args.ScopeManagementPorts=$true }
             if ($case -eq 'inactive') {
                 $script:HostListeners=@()
-                foreach ($name in @('CCDC-Host-WinRM-5985','CCDC-Host-WinRM-5986','CCDC-Detected-TCP-445','CCDC-Detected-UDP-137','CCDC-Detected-TCP-50000','CCDC-Detected-TCP-60000')) {
-                    $script:HostRules[$name]=[pscustomobject]@{Name=$name;DisplayName=$name;Enabled=($name -notlike '*60000');Direction='Inbound';Action='Allow';RemoteAddress=@('Any');PolicyStoreSourceType='Local'}
+                foreach ($name in @('CCDC-Host-WinRM-5985','CCDC-Host-WinRM-5986','CCDC-Host-RDP-TCP-3389','CCDC-Host-RDP-UDP-3389',
+                    'CCDC-Detected-TCP-445','CCDC-Detected-UDP-137','CCDC-Detected-TCP-50000','CCDC-Detected-TCP-60000')) {
+                    $protocol=if ($name -like '*-UDP-*') { 'UDP' } else { 'TCP' }
+                    $script:HostRules[$name]=[pscustomobject]@{Name=$name;DisplayName=$name;Enabled=($name -notlike '*60000');Direction='Inbound';Action='Allow';Protocol=$protocol;LocalPort=[int]($name.Split('-')[-1]);RemoteAddress=@('Any');PolicyStoreSourceType='Local'}
                 }
                 $args.ScopeManagementPorts=$true; $args.ScopeSystemPorts=$true; $args.ManagementRange=@('10.2.0.0/16')
             }
             if ($case -eq 'empty') { $script:HostRules=@{} }
             if ($case -eq 'query-error') { $script:HostQueryFailure=$true }
+            if ($case -like 'kernel*') {
+                $script:HostKernelMode=$case
+                $script:HostListeners=@(80,443,445,139)
+                $script:HostListenerPid=4
+                if ($case -eq 'kernel-disable') { $args.DisableExistingInboundAllows=$true }
+                if ($case -eq 'kernel-system') { $args.ScopeSystemPorts=$true; $args.ManagementRange=@('10.2.0.0/16') }
+                if ($case -eq 'kernel-no-listener') { $script:HostListeners=@() }
+                if ($case -eq 'kernel-wrong-pid') { $script:HostListenerPid=99 }
+            }
+            if ($case -in @('dual-protocol','dual-disable','dual-scoped','legacy-udp','fresh-dual')) {
+                $script:HostUdpListener=$true
+                if ($case -eq 'dual-disable') { $args.DisableExistingInboundAllows=$true }
+                if ($case -eq 'dual-scoped') { $args.ScopeManagementPorts=$true; $args.ManagementRange=@('10.2.0.0/16') }
+                if ($case -eq 'legacy-udp') { $script:HostRules['CCDC-Host-RDP-3389'].Protocol='17' }
+                if ($case -eq 'fresh-dual') { $script:HostRules.Remove('CCDC-Host-RDP-3389') }
+            }
             if ($case -in @('mask-readback','mask-input','ipv6-readback','host-readback','wrong-readback','invalid-mask')) {
                 $args.ScopeManagementPorts=$true; $args.ManagementRange=@('10.2.0.0/16')
                 switch ($case) {
@@ -120,22 +158,49 @@ $ErrorActionPreference = 'Stop'
                 if (-not $failed -or $script:HostImports -ne 1) { throw 'Genuinely different readback did not trigger backup recovery.' }
             } elseif ($case -eq 'empty') {
                 if ($script:HostRules.Count -ne 4 -or $script:HostImports) { throw 'An empty allow set prevented discovered rules from being created.' }
+            } elseif ($case -in @('kernel-no-service','kernel-no-listener','kernel-wrong-pid')) {
+                if ($script:HostRules.Count -ne 2 -or $script:HostImports) { throw 'Kernel fallback allowed a port without a matching running service and PID 4 listener.' }
+            } elseif ($case -like 'kernel*') {
+                foreach ($port in @(80,443,445,139)) {
+                    $rule=$script:HostRules["CCDC-Detected-TCP-$port"]
+                    $expected=if ($case -eq 'kernel-system' -and $port -in @(445,139)) { '10.2.0.0/16' } else { 'Any' }
+                    if (-not $rule -or -not $rule.Enabled -or $rule.Protocol -ne 'TCP' -or
+                        $rule.LocalPort -ne $port -or "$($rule.RemoteAddress)" -ne $expected) {
+                        throw "Kernel-owned TCP/$port was not allowed with the requested scope."
+                    }
+                }
+                if ($case -eq 'kernel-disable' -and $script:HostDisabled.Count -ne 2) { throw 'Kernel fixture did not exercise disabling pre-existing allows.' }
             } elseif ($case -eq 'inactive') {
-                foreach ($name in @('CCDC-Host-RDP-3389','CCDC-Host-WinRM-5985','CCDC-Host-WinRM-5986','CCDC-Detected-TCP-445','CCDC-Detected-UDP-137','CCDC-Detected-TCP-50000')) {
+                foreach ($name in @('CCDC-Host-RDP-3389','CCDC-Host-WinRM-5985','CCDC-Host-WinRM-5986','CCDC-Host-RDP-TCP-3389','CCDC-Host-RDP-UDP-3389',
+                    'CCDC-Detected-TCP-445','CCDC-Detected-UDP-137','CCDC-Detected-TCP-50000')) {
+                    $summaryName=$name -replace 'CCDC-Host-RDP-3389','CCDC-Host-RDP-TCP-3389' -replace 'CCDC-Host-WinRM-(598[56])','CCDC-Host-WinRM-TCP-$1'
                     if ("$($script:HostRules[$name].RemoteAddress)" -ne '10.2.0.0/16' -or
-                        -not @($script:HostMessages | Where-Object { $_ -like "*scoped-rule summary*$name remote=10.2.0.0/16*" }).Count) {
+                        -not @($script:HostMessages | Where-Object { $_ -like "*scoped-rule summary*$summaryName remote=10.2.0.0/16*" }).Count) {
                         throw "Inactive helper was not scoped and summarized: $name"
                     }
                 }
                 if ($script:HostRules['CCDC-Detected-TCP-60000'].Enabled -or
                     "$($script:HostRules['Site-Service'].RemoteAddress)" -ne 'Any') { throw 'Inactive scoping enabled a disabled rule or narrowed unrelated rules.' }
             } elseif ($case -in @('mask-readback','mask-input','ipv6-readback','host-readback')) {
-                if ($script:HostImports -or -not @($script:HostMessages | Where-Object { $_ -like '*scoped-rule summary*CCDC-Host-RDP-3389*' }).Count) {
+                if ($script:HostImports -or -not @($script:HostMessages | Where-Object { $_ -like '*scoped-rule summary*CCDC-Host-RDP-TCP-3389*' }).Count) {
                     throw 'Equivalent address forms failed verification.'
                 }
+            } elseif ($case -in @('dual-protocol','dual-disable','dual-scoped','legacy-udp','fresh-dual')) {
+                $tcpName=if ($case -in @('legacy-udp','fresh-dual')) { 'CCDC-Host-RDP-TCP-3389' } else { 'CCDC-Host-RDP-3389' }
+                $udpName=if ($case -eq 'legacy-udp') { 'CCDC-Host-RDP-3389' } else { 'CCDC-Host-RDP-UDP-3389' }
+                $tcp=$script:HostRules[$tcpName]
+                $udp=$script:HostRules[$udpName]
+                if (-not $tcp -or -not $udp -or $tcp.Name -eq $udp.Name -or
+                    "$($tcp.Protocol)" -notin @('TCP','6') -or "$($udp.Protocol)" -notin @('UDP','17') -or
+                    $tcp.LocalPort -ne 3389 -or $udp.LocalPort -ne 3389 -or -not $tcp.Enabled -or -not $udp.Enabled) {
+                    throw 'Simultaneous RDP transports did not retain distinct enabled rules and port filters.'
+                }
+                $tcpScope=if ($case -eq 'dual-scoped') { '10.2.0.0/16' } elseif ($case -in @('dual-disable','legacy-udp','fresh-dual')) { 'Any' } else { '10.1.0.0/16' }
+                $udpScope=if ($case -eq 'dual-scoped') { '10.2.0.0/16' } elseif ($case -eq 'legacy-udp') { '10.1.0.0/16' } else { 'Any' }
+                if ("$($tcp.RemoteAddress)" -ne $tcpScope -or "$($udp.RemoteAddress)" -ne $udpScope) { throw 'Protocol-specific rules did not preserve the requested scopes.' }
             } else {
                 $rdp=$script:HostRules['CCDC-Host-RDP-3389']
-                $winrm=$script:HostRules['CCDC-Host-WinRM-5985']
+                $winrm=$script:HostRules['CCDC-Host-WinRM-TCP-5985']
                 $smb=$script:HostRules['CCDC-Detected-TCP-445']
                 if (-not @($script:HostMessages | Where-Object { $_ -like '*Existing inbound allow name=Site-Service*' }).Count) { throw 'Existing rules were not reported.' }
                 if ($case -ne 'disable' -and ($script:HostDisabled.Count -or -not $script:HostRules['Site-Service'].Enabled)) { throw 'Existing site rule was disabled without opt-in.' }
@@ -151,7 +216,7 @@ $ErrorActionPreference = 'Stop'
             Write-Host "PASS host firewall $case"
         }
     } finally {
-        Remove-Variable HostRules,HostMessages,HostDisabled,HostListeners,HostQueryFailure,HostImports,HostReadback -Scope Script -ErrorAction SilentlyContinue
+        Remove-Variable HostRules,HostMessages,HostDisabled,HostListeners,HostListenerPid,HostKernelMode,HostUdpListener,HostQueryFailure,HostImports,HostReadback -Scope Script -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $fixture -Recurse -Force
     }
 }

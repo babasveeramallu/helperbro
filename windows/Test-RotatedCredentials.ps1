@@ -73,6 +73,7 @@ function New-RandomPassword { 'Synthetic-Test-Password-42!' }
 function icacls.exe { $global:LASTEXITCODE = 0 }
 function Set-LocalUser {
     param($Name, $Password)
+    Set-Content -LiteralPath (Join-Path $env:CCDC_FIXTURE_REPORT 'changed.txt') -Value 'changed'
     $file = [IO.Directory]::GetFiles($env:CCDC_FIXTURE_REPORT, 'rotated-credentials-*.txt')[0]
     $record = @(Get-Content -LiteralPath $file)[0] -split "`t"
     $saved = Unprotect-CCDCCredential $record[1]
@@ -80,7 +81,6 @@ function Set-LocalUser {
         [Net.NetworkCredential]::new('', $saved).Password -cne [Net.NetworkCredential]::new('', $Password).Password) {
         throw 'A readable recovery record must exist before the password change.'
     }
-    Set-Content -LiteralPath (Join-Path $env:CCDC_FIXTURE_REPORT 'changed.txt') -Value 'changed'
 }
 if ($env:CCDC_FIXTURE_SCENARIO -eq 'decrypt-failure') {
     function Unprotect-CCDCCredential { param($Text) throw 'Simulated DPAPI failure' }

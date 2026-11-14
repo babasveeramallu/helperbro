@@ -69,8 +69,16 @@ function Set-CCDCWindowsFirewall {
         if ($service) { [pscustomobject]@{ Protocol=$listener.Protocol; Port=$listener.Port; Service=$service.Name; PID=$listener.PID } }
         else { Write-Log FLAG "Listener $($listener.Protocol)/$($listener.Port) PID=$($listener.PID) has no mapped running service; not auto-allowed." }
     })
-    foreach ($special in @(@{Port=3389;Service='TermService'},@{Port=5985;Service='WinRM'},@{Port=5986;Service='WinRM'})) {
-        $hasListener = @($listeners | Where-Object { $_.Protocol -eq 'TCP' -and $_.Port -eq $special.Port }).Count -gt 0
+    # IIS/http.sys and SMB listen as PID 4 rather than their service process.
+    $kernelServices = @(
+        @{Port=3389;Service='TermService'},@{Port=5985;Service='WinRM'},@{Port=5986;Service='WinRM'},
+        @{Port=80;Service='W3SVC';KernelOnly=$true},@{Port=443;Service='W3SVC';KernelOnly=$true},
+        @{Port=445;Service='LanmanServer';KernelOnly=$true},@{Port=139;Service='LanmanServer';KernelOnly=$true}
+    )
+    foreach ($special in $kernelServices) {
+        $hasListener = @($listeners | Where-Object {
+            $_.Protocol -eq 'TCP' -and $_.Port -eq $special.Port -and (-not $special.KernelOnly -or $_.PID -eq 4)
+        }).Count -gt 0
         $service = $serviceMap | Where-Object Name -eq $special.Service | Select-Object -First 1
         if ($hasListener -and $service -and -not (@($detected | Where-Object { $_.Protocol -eq 'TCP' -and $_.Port -eq $special.Port }).Count)) {
             $detected += [pscustomobject]@{ Protocol='TCP'; Port=$special.Port; Service=$special.Service; PID=$service.ProcessId }
@@ -151,6 +159,10 @@ function Set-CCDCWindowsFirewall {
                 }
                 foreach ($existingRule in $existingRules) {
                     if (-not $created -and -not $scoped -and -not $DisableExistingInboundAllows) {
+                        if ($existingRule.Direction -eq 'Inbound' -and $existingRule.Action -eq 'Allow' -and "$($existingRule.Enabled)" -ne 'True') {
+                            Set-NetFirewallRule -InputObject $existingRule -Enabled True -ErrorAction Stop
+                            Write-Log CHANGE "Re-enabled detected service helper without changing its scope: $($existingRule.DisplayName)"
+                        }
                         Write-Log INFO "Preserved existing helper rule and scope: $($existingRule.DisplayName)"
                         continue
                     }

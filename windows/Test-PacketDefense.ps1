@@ -77,20 +77,29 @@ function New-PacketPrivateDirectory {
 }
 function Get-NetFirewallProfile {
     param($PolicyStore,$ErrorAction)
-    foreach ($profile in @('Domain','Private','Public')) {
-        [pscustomobject]@{ Name=$profile; Enabled=$global:DefenseFixture.Enabled
-            DefaultInboundAction=$global:DefenseFixture.Inbound; DefaultOutboundAction='Allow'
+    foreach ($name in @('Domain','Private','Public')) {
+        $profile = $global:DefenseFixture.Profiles[$name]
+        [pscustomobject]@{ Name=$name; Enabled=$profile.Enabled
+            DefaultInboundAction=$profile.Inbound; DefaultOutboundAction=$profile.Outbound
             AllowLocalFirewallRules=$true; AllowInboundRules=$true }
     }
 }
 function Get-NetFirewallRule {
     param($PolicyStore,$Name,$Enabled,$Action,$Direction,$ErrorAction)
+    if ($global:DefenseFixture.FailRuleQuery) { throw 'Simulated firewall query failure' }
     $matched = @(foreach ($r in @($global:DefenseFixture.Rules.Values)) {
         if ($Name -and $r.Name -ne $Name) { continue }
         if ($Action -and $r.Action -ne $Action) { continue }
         if ($Direction -and $r.Direction -ne $Direction) { continue }
         $r
     })
+    if ($Name -and -not $matched.Count) {
+        $global:DefenseFixture.MissingRuleQueries++
+        throw [Management.Automation.ErrorRecord]::new(
+            [Microsoft.PowerShell.Cmdletization.Cim.CimJobException]::new('No matching MSFT_NetFirewallRule objects found'),
+            'CmdletizationQuery_NotFound_InstanceID,Get-NetFirewallRule',
+            [Management.Automation.ErrorCategory]::ObjectNotFound, $Name)
+    }
     if ($Action -and -not $matched.Count -and $ErrorAction -eq 'Stop') {
         throw 'No matching MSFT_NetFirewallRule objects found'
     }
@@ -110,21 +119,36 @@ function Remove-NetFirewallRule {
     [CmdletBinding()]param([Parameter(ValueFromPipeline)]$Rule)
     process {
         if ($Rule.Group -notin @('CCDC Packet Baseline','CCDC Decoy')) { throw 'Attempted to remove unowned rule' }
+        $global:DefenseFixture.RemoveCount++
+        if ($global:DefenseFixture.FailRemoveAt -and $global:DefenseFixture.RemoveCount -ge $global:DefenseFixture.FailRemoveAt) { throw 'Simulated rule removal failure' }
         $global:DefenseFixture.Rules.Remove($Rule.Name)
     }
 }
 function New-NetFirewallRule {
     param($PolicyStore,$Name,$DisplayName,$Group,$Enabled,$Action,$Profile,$Direction,$Protocol,$RemoteAddress,$LocalPort,$RemotePort,$IcmpType,$ErrorAction)
-    if ($global:DefenseFixture.FailCreate) { throw 'Simulated rule failure' }
+    $global:DefenseFixture.CreateCount++
+    if ($global:DefenseFixture.FailCreateAt -and $global:DefenseFixture.CreateCount -ge $global:DefenseFixture.FailCreateAt) {
+        if ($global:DefenseFixture.ProfileChangeOnCreateFailure) { $global:DefenseFixture.Profiles.Domain.Inbound='Block' }
+        throw 'Simulated rule failure'
+    }
     $r=[pscustomobject]@{Name=$Name;DisplayName=$DisplayName;Group=$Group;Enabled=$true;Action=$Action;Profile=$Profile
         Direction=$Direction;Protocol=$Protocol;RemoteAddress=$RemoteAddress;LocalPort=$LocalPort;RemotePort=$RemotePort}
     $global:DefenseFixture.Rules[$Name]=$r
     $r
 }
 function Set-NetFirewallProfile {
-    param($PolicyStore,$Profile,$Enabled,$DefaultInboundAction,$DefaultOutboundAction,$ErrorAction)
-    $global:DefenseFixture.Enabled=$true
-    $global:DefenseFixture.Inbound=$DefaultInboundAction
+    param($PolicyStore,$Name,$Enabled,$DefaultInboundAction,$DefaultOutboundAction,$ErrorAction)
+    if ($global:DefenseFixture.FailProfile) { throw 'Simulated profile failure' }
+    if ($PolicyStore -eq 'PersistentStore' -and @('Enabled','DefaultInboundAction','DefaultOutboundAction' |
+        Where-Object { $PSBoundParameters.ContainsKey($_) -and $PSBoundParameters[$_] -eq 'NotConfigured' }).Count) {
+        throw 'NotConfigured writes to PersistentStore are unsupported in this fixture'
+    }
+    foreach ($profileName in $Name) {
+        $profile = $global:DefenseFixture.Profiles[$profileName]
+        if ($PSBoundParameters.ContainsKey('Enabled')) { $profile.Enabled = "$Enabled" }
+        if ($PSBoundParameters.ContainsKey('DefaultInboundAction')) { $profile.Inbound = "$DefaultInboundAction" }
+        if ($PSBoundParameters.ContainsKey('DefaultOutboundAction')) { $profile.Outbound = "$DefaultOutboundAction" }
+    }
 }
 function Get-ScheduledTask {
     param($TaskName,$ErrorAction)
@@ -152,15 +176,10 @@ function Invoke-DefenseNetsh {
     param($Context,$Verb,$File)
     $global:LASTEXITCODE=0
     if ($Verb -eq 'export') {
-        $snapshot=@{Rules=$global:DefenseFixture.Rules.Clone();Enabled=$global:DefenseFixture.Enabled;Inbound=$global:DefenseFixture.Inbound}
-        $global:DefenseFixture.Snapshots[$File]=$snapshot
         [IO.File]::WriteAllText($File,'synthetic firewall snapshot')
     } elseif ($Verb -eq 'import') {
-        $snapshot=$global:DefenseFixture.Snapshots[$File]
-        $global:DefenseFixture.Rules=$snapshot.Rules.Clone()
-        $global:DefenseFixture.Enabled=$snapshot.Enabled
-        $global:DefenseFixture.Inbound=$snapshot.Inbound
         $global:DefenseFixture.Imports++
+        throw 'Full policy import is not permitted in this fixture'
     } else { throw 'Unexpected netsh verb' }
 }
 Set-Alias -Name "$env:SystemRoot\System32\netsh.exe" -Value Invoke-DefenseNetsh -WhatIf:$false
@@ -170,8 +189,13 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
     $unowned = [pscustomobject]@{ Name='Existing-Admin'; DisplayName='Existing admin'; Group='site'
         Enabled=$true; Action='Allow'; Direction='Inbound'; Protocol='TCP';LocalPort='5985';RemoteAddress='Any' }
     $global:DefenseFixture = @{
-        Root=$fixture; Rules=@{'Existing-Admin'=$unowned}; Tasks=@{}; Snapshots=@{}
-        Enabled=$false; Inbound='Allow'; Imports=0; FailCreate=$false; BadTask=$false
+        Root=$fixture; Rules=@{'Existing-Admin'=$unowned}; Tasks=@{}
+        Profiles=@{
+            Domain=@{Enabled='False';Inbound='Allow';Outbound='Block';LogBlocked='False'}
+            Private=@{Enabled='False';Inbound='Allow';Outbound='Block'}
+            Public=@{Enabled='True';Inbound='Block';Outbound='Allow'}
+        }
+        Imports=0; MissingRuleQueries=0; FailCreateAt=0; CreateCount=0; FailRemoveAt=0; RemoveCount=0; FailRuleQuery=$false; FailProfile=$false; ProfileChangeOnCreateFailure=$false; BadTask=$false
     }
     $before=@(Get-ChildItem $fixture -Recurse).Count
     & "$fixture\Start-WindowsDecoy.ps1" -AuditOnly
@@ -187,32 +211,96 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
 
     & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
     $run = (Get-ChildItem "$fixture\runs" -Directory | Select-Object -First 1).FullName
-    Assert-Defense ($global:DefenseFixture.Enabled -and $global:DefenseFixture.Inbound -eq 'Block') 'Apply enables default inbound block'
+    Assert-Defense ($global:DefenseFixture.Profiles.Domain.Enabled -eq 'True' -and $global:DefenseFixture.Profiles.Domain.Inbound -eq 'Block') 'Apply enables default inbound block'
     Assert-Defense ($global:DefenseFixture.Rules.ContainsKey('Existing-Admin')) 'Apply preserves preexisting admin rule'
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 1) 'Independent timer armed'
     $rejected=$false
     try { & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force } catch { $rejected=$_.Exception.Message -like '*rollback task already exists*' }
     Assert-Defense $rejected 'Pending run prevents stacking'
-    $rejected=$false
-    try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $run -Action Commit -Force } catch { $rejected=$_.Exception.Message -like '*-ScoringVerified*' }
-    Assert-Defense $rejected 'Commit requires external-check acknowledgement'
-    & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $run -Action Commit -ScoringVerified -Force
-    Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Commit removes rollback task'
-    Assert-Defense ((Get-Content "$run\state.json" -Raw | ConvertFrom-Json).Status -eq 'Committed') 'Commit persists terminal state'
+    $state = Get-Content "$run\state.json" -Raw | ConvertFrom-Json
+    $manual = [pscustomobject]@{Name='Teammate-Service';DisplayName='Teammate service';Group='site';Enabled=$true;Action='Allow';Direction='Inbound';Protocol='TCP';LocalPort='12345';RemoteAddress='Any'}
+    $global:DefenseFixture.Rules[$manual.Name] = $manual
+    $global:DefenseFixture.Profiles.Domain.LogBlocked = 'True'
+    & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $run -Action Revert -Force
+    Assert-Defense ($global:DefenseFixture.Imports -eq 0) 'Revert never imports full policy'
+    Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Revert removes timer'
+    Assert-Defense ($global:DefenseFixture.Rules.ContainsKey('Existing-Admin') -and $global:DefenseFixture.Rules.ContainsKey('Teammate-Service')) 'Revert preserves existing and newly added site rules'
+    Assert-Defense (@($state.RuleNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq 0) 'Revert removes all run-specific rules'
+    Assert-Defense ($global:DefenseFixture.Profiles.Domain.Enabled -eq 'False' -and $global:DefenseFixture.Profiles.Domain.Inbound -eq 'Allow' -and $global:DefenseFixture.Profiles.Domain.Outbound -eq 'Block') 'Revert restores distinct Domain profile values'
+    Assert-Defense ($global:DefenseFixture.Profiles.Domain.LogBlocked -eq 'True') 'Revert preserves unrelated profile settings'
+    Assert-Defense ($global:DefenseFixture.Profiles.Private.Enabled -eq 'False' -and $global:DefenseFixture.Profiles.Private.Inbound -eq 'Allow' -and $global:DefenseFixture.Profiles.Private.Outbound -eq 'Block') 'Revert restores explicit Private profile values'
+    Assert-Defense ($global:DefenseFixture.MissingRuleQueries -gt 0) 'Apply and revert suppress representative missing-name ObjectNotFound errors'
+    Assert-Defense ($global:DefenseFixture.Profiles.Public.Enabled -eq 'True' -and $global:DefenseFixture.Profiles.Public.Inbound -eq 'Block' -and $global:DefenseFixture.Profiles.Public.Outbound -eq 'Allow') 'Revert preserves unchanged profile values'
 
     & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
     $pending = Get-ChildItem "$fixture\runs" -Directory | Where-Object { (Get-Content "$($_.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Pending' }
+    $rejected=$false
+    try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Commit -Force } catch { $rejected=$_.Exception.Message -like '*-ScoringVerified*' }
+    Assert-Defense $rejected 'Commit requires external-check acknowledgement'
+    $committedNames = @((Get-Content "$($pending.FullName)\state.json" -Raw | ConvertFrom-Json).RuleNames)
+    & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Commit -ScoringVerified -Force
+    Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Commit removes rollback task'
+    Assert-Defense ((Get-Content "$($pending.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Committed') 'Commit persists terminal state'
+
+    & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
+    $pending = Get-ChildItem "$fixture\runs" -Directory | Where-Object { (Get-Content "$($_.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Pending' }
+    $newNames = @((Get-Content "$($pending.FullName)\state.json" -Raw | ConvertFrom-Json).RuleNames)
     & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force
-    Assert-Defense ($global:DefenseFixture.Imports -eq 1) 'Revert imports saved policy'
-    Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Revert removes timer'
-    Assert-Defense ($global:DefenseFixture.Rules.ContainsKey('Existing-Admin')) 'Revert preserves old site rule'
-    $global:DefenseFixture.FailCreate=$true
+    Assert-Defense (@($committedNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq $committedNames.Count) 'Revert retains previously committed rules'
+    Assert-Defense (@($newNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq 0) 'Revert removes only the later run'
+    $global:DefenseFixture.CreateCount=0
+    $global:DefenseFixture.FailCreateAt=2
+    $global:DefenseFixture.Profiles.Domain.Inbound='Allow'
+    $global:DefenseFixture.ProfileChangeOnCreateFailure=$true
+    $ruleCount = $global:DefenseFixture.Rules.Count
     $rejected=$false
     try { & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force } catch { $rejected=$_.Exception.Message -like '*Simulated rule failure*' }
     Assert-Defense $rejected 'Rule failure is propagated'
-    Assert-Defense ($global:DefenseFixture.Imports -eq 2) 'Rule failure immediately restores snapshot'
+    Assert-Defense ($global:DefenseFixture.Imports -eq 0 -and @($committedNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq $committedNames.Count) 'Rule failure preserves earlier policy without import'
+    Assert-Defense ($global:DefenseFixture.Rules.Count -eq $ruleCount) 'Partial apply removes its created rules'
+    Assert-Defense ($global:DefenseFixture.Profiles.Domain.Inbound -eq 'Block') 'Early apply failure preserves independently changed profile'
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Recovered failure removes its timer'
-    $global:DefenseFixture.FailCreate=$false
+    $global:DefenseFixture.FailCreateAt=0
+    $global:DefenseFixture.ProfileChangeOnCreateFailure=$false
+
+    $global:DefenseFixture.Profiles.Domain.Enabled='False'
+    $global:DefenseFixture.Profiles.Domain.Inbound='Allow'
+    & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
+    $pending = Get-ChildItem "$fixture\runs" -Directory | Where-Object { (Get-Content "$($_.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Pending' }
+    $global:DefenseFixture.Profiles.Domain.Inbound='NotConfigured'
+    $rejected=$false
+    try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force }
+    catch { $rejected=$_.Exception.Message -like '*changed independently*' }
+    Assert-Defense ($rejected -and $global:DefenseFixture.Profiles.Domain.Inbound -eq 'NotConfigured') 'Conflicting profile change is not overwritten'
+    Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 1) 'Profile conflict leaves watchdog armed'
+    $global:DefenseFixture.Profiles.Domain.Inbound='Block'
+    $global:DefenseFixture.FailProfile=$true
+    $rejected=$false
+    try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force }
+    catch { $rejected=$_.Exception.Message -like '*Simulated profile failure*' }
+    Assert-Defense ($rejected -and $global:DefenseFixture.Tasks.Count -eq 1) 'Failed profile restore leaves watchdog armed'
+    $global:DefenseFixture.FailProfile=$false
+    & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force
+    Assert-Defense ($global:DefenseFixture.Profiles.Domain.Enabled -eq 'False' -and $global:DefenseFixture.Profiles.Domain.Inbound -eq 'Allow') 'Retry restores profile after conflict and failure'
+
+    & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
+    $pending = Get-ChildItem "$fixture\runs" -Directory | Where-Object { (Get-Content "$($_.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Pending' }
+    $newNames = @((Get-Content "$($pending.FullName)\state.json" -Raw | ConvertFrom-Json).RuleNames)
+    $global:DefenseFixture.FailRuleQuery=$true
+    $rejected=$false
+    try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force }
+    catch { $rejected=$_.Exception.Message -like '*Simulated firewall query failure*' }
+    Assert-Defense ($rejected -and $global:DefenseFixture.Tasks.Count -eq 1) 'Firewall query failure leaves watchdog armed'
+    $global:DefenseFixture.FailRuleQuery=$false
+    $global:DefenseFixture.RemoveCount=0
+    $global:DefenseFixture.FailRemoveAt=2
+    $rejected=$false
+    try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force }
+    catch { $rejected=$_.Exception.Message -like '*Simulated rule removal failure*' }
+    Assert-Defense ($rejected -and $global:DefenseFixture.Tasks.Count -eq 1) 'Partial rule removal leaves watchdog armed'
+    $global:DefenseFixture.FailRemoveAt=0
+    & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force
+    Assert-Defense (@($newNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq 0 -and $global:DefenseFixture.Rules.ContainsKey('Teammate-Service')) 'Retry finishes removal without touching teammate rule'
 
     # Expired confirmation must not disarm the watchdog or import silently.
     & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
@@ -225,12 +313,15 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
     catch { $rejected=$_.Exception.Message -like '*deadline passed*' }
     Assert-Defense $rejected 'Expired confirmation rejected'
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 1) 'Expired confirmation leaves timer armed'
-    [IO.File]::AppendAllText("$($pending.FullName)\before.wfw",'changed')
+    $originalNames = @($state.RuleNames)
+    $state.RuleNames = @('Existing-Admin')
+    $state | ConvertTo-Json -Depth 6 | Set-Content "$($pending.FullName)\state.json" -Encoding UTF8
     $rejected=$false
     try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force }
-    catch { $rejected=$_.Exception.Message -like '*checksum mismatch*' }
-    Assert-Defense $rejected 'Tampered rollback snapshot refused'
-    [IO.File]::WriteAllText("$($pending.FullName)\before.wfw",'synthetic firewall snapshot')
+    catch { $rejected=$_.Exception.Message -like '*rule list*' }
+    Assert-Defense ($rejected -and $global:DefenseFixture.Rules.ContainsKey('Existing-Admin')) 'Tampered run rule list refused'
+    $state.RuleNames = $originalNames
+    $state | ConvertTo-Json -Depth 6 | Set-Content "$($pending.FullName)\state.json" -Encoding UTF8
     & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Watchdog action remains usable after failed confirmation'
 
@@ -272,6 +363,32 @@ if ((Get-Command "$env:SystemRoot\System32\netsh.exe").CommandType -ne 'Alias') 
     Assert-Defense $rejected 'Unready watchdog blocks apply'
     Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 0) 'Unready unused watchdog is removed'
     $global:DefenseFixture.BadTask=$false
+
+    $global:DefenseFixture.Profiles.Private=@{Enabled='NotConfigured';Inbound='NotConfigured';Outbound='NotConfigured'}
+    $global:DefenseFixture.Profiles.Domain=@{Enabled='False';Inbound='Allow';Outbound='Block'}
+    & "$fixture\Set-PacketFirewall.ps1" -Role Wkst -OutputDirectory "$fixture\runs" -Force
+    $pending = Get-ChildItem "$fixture\runs" -Directory | Where-Object { (Get-Content "$($_.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Pending' }
+    $newNames = @((Get-Content "$($pending.FullName)\state.json" -Raw | ConvertFrom-Json).RuleNames)
+    foreach ($attempt in 1..2) {
+        $failure = ''
+        try { & "$fixture\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $pending.FullName -Action Revert -Force }
+        catch { $failure = $_.Exception.Message }
+        Assert-Defense ($failure -like '*cannot restore NotConfigured in PersistentStore*' -and
+            $failure -like '*Private.Enabled*' -and $failure -like '*Private.DefaultInboundAction*' -and
+            $failure -like '*Private.DefaultOutboundAction*') "Unsupported restore reports every affected field on attempt $attempt"
+        Assert-Defense (@($newNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq 0) "Unsupported restore still removes run rules on attempt $attempt"
+        Assert-Defense ($global:DefenseFixture.Tasks.Count -eq 1 -and
+            (Get-Content "$($pending.FullName)\state.json" -Raw | ConvertFrom-Json).Status -eq 'Pending') "Incomplete recovery retains pending state and watchdog on attempt $attempt"
+    }
+    Assert-Defense ($global:DefenseFixture.Profiles.Domain.Enabled -eq 'False' -and
+        $global:DefenseFixture.Profiles.Domain.Inbound -eq 'Allow' -and
+        $global:DefenseFixture.Profiles.Domain.Outbound -eq 'Block') 'Unsupported fields do not prevent supported profile restores'
+    Assert-Defense ($global:DefenseFixture.Profiles.Private.Enabled -eq 'True' -and
+        $global:DefenseFixture.Profiles.Private.Inbound -eq 'Block' -and
+        $global:DefenseFixture.Profiles.Private.Outbound -eq 'Allow') 'Unsupported fields remain at applied values without an unsafe substitute'
+    Assert-Defense ($global:DefenseFixture.Rules.ContainsKey('Teammate-Service') -and
+        @($committedNames | Where-Object { $global:DefenseFixture.Rules.ContainsKey($_) }).Count -eq $committedNames.Count -and
+        $global:DefenseFixture.Imports -eq 0) 'Incomplete recovery preserves teammate and committed rules without full import'
 
     # Loopback sockets only: no services, event-source registrations or firewall
     # changes. The worker emits objects instead of writing to Windows Event Log.

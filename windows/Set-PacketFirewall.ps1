@@ -71,16 +71,33 @@ Assert-PacketLocalPath $OutputDirectory
 if (@(Get-ScheduledTask -TaskName 'CCDC-FirewallRollback-*' -ErrorAction SilentlyContinue).Count) {
     throw 'A packet firewall rollback task already exists. Commit/revert or investigate that run before starting another.'
 }
-# Do not overwrite or broaden an unrelated rule that uses our reserved name.
-foreach ($entry in $plan) {
-    $existing = Get-NetFirewallRule -PolicyStore PersistentStore -Name $entry.Name -ErrorAction SilentlyContinue
-    if ($existing -and $existing.Group -ne 'CCDC Packet Baseline') {
-        throw "Unowned rule has a reserved name: $($entry.Name). Nothing was overwritten."
-    }
-}
 if ($Force) { $ConfirmPreference = 'None' }
 if (-not $PSCmdlet.ShouldProcess($env:COMPUTERNAME, 'Add packet firewall rules and enable default inbound block with timed rollback')) { return }
-$run = Join-Path $OutputDirectory ("run-" + [guid]::NewGuid().ToString('N'))
+$localProfiles = @(Get-NetFirewallProfile -PolicyStore PersistentStore -ErrorAction Stop)
+if ($localProfiles.Count -ne 3 -or
+    @($localProfiles.Name | Sort-Object -Unique).Count -ne 3 -or
+    @($localProfiles | Where-Object { $_.Name -notin @('Domain','Private','Public') }).Count) {
+    throw 'Could not capture all three local firewall profiles; nothing applied.'
+}
+$originalProfiles = @(foreach ($profile in $localProfiles) {
+    $enabled = "$($profile.Enabled)"
+    $inbound = "$($profile.DefaultInboundAction)"
+    $outbound = "$($profile.DefaultOutboundAction)"
+    if ($enabled -notin @('True','False','NotConfigured') -or
+        $inbound -notin @('Allow','Block','NotConfigured') -or
+        $outbound -notin @('Allow','Block','NotConfigured')) {
+        throw "Cannot safely restore the local profile $($profile.Name); nothing applied."
+    }
+    [pscustomobject]@{ Name=$profile.Name; Enabled=$enabled; DefaultInboundAction=$inbound; DefaultOutboundAction=$outbound }
+})
+$runId = [guid]::NewGuid().ToString('N')
+$run = Join-Path $OutputDirectory "run-$runId"
+foreach ($entry in $plan) {
+    $entry.Name = "CCDC-Packet-$runId-$($entry.Name.Substring('CCDC-Packet-'.Length))"
+    if (@(Get-PacketLocalFirewallRule -Name $entry.Name).Count) {
+        throw "Run-specific firewall rule already exists: $($entry.Name). Nothing was overwritten."
+    }
+}
 New-PacketPrivateDirectory $run
 $backup = Join-Path $run 'before.wfw'
 & "$env:SystemRoot\System32\netsh.exe" advfirewall export $backup
@@ -95,6 +112,7 @@ $deadline = (Get-Date).AddMinutes($RollbackMinutes)
 $taskName = 'CCDC-FirewallRollback-' + [guid]::NewGuid().ToString('N')
 $state = [ordered]@{
     Status = 'Pending'; TaskName = $taskName; Computer = $env:COMPUTERNAME; Role = $Role
+    SchemaVersion = 2; RunId = $runId; RuleNames = @($plan.Name); Profiles = $originalProfiles
     DeadlineUtc = $deadline.ToUniversalTime().ToString('o')
     BackupHash = (Get-FileHash -LiteralPath $backup -Algorithm SHA256).Hash
 }
@@ -110,13 +128,13 @@ try {
     if ((Get-ScheduledTask -TaskName $taskName -ErrorAction Stop).State -ne 'Ready') {
         throw 'Rollback task is not Ready; firewall was not changed.'
     }
-    # The same lock prevents rollback importing while an apply operation is in flight.
+    # The same lock prevents rollback while an apply operation is in flight.
     $lock = [IO.File]::Open((Join-Path $run 'operation.lock'), 'Open', 'ReadWrite', 'None')
 }
 catch {
     $failure = $_
     # No firewall changes have begun. Cancel an incompletely armed watchdog so
-    # it cannot later overwrite somebody else's policy with this unused backup.
+    # it cannot later act on this unused run.
     $state.Status = 'Reverted'
     $state | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'state.json') -Encoding UTF8
     try {
@@ -140,13 +158,23 @@ try {
             else { $parameters.LocalPort = $entry.Port }
         }
         if ($entry.IcmpType) { $parameters.IcmpType = $entry.IcmpType }
-        # Refresh only our owned rule; all unrelated rules remain untouched.
-        Get-NetFirewallRule -PolicyStore PersistentStore -Name $entry.Name -ErrorAction SilentlyContinue |
-            Remove-NetFirewallRule -ErrorAction Stop
+        if (@(Get-PacketLocalFirewallRule -Name $entry.Name).Count) {
+            throw "Run-specific firewall rule appeared during apply: $($entry.Name)."
+        }
         New-NetFirewallRule @parameters -ErrorAction Stop | Out-Null
     }
     # Allow rules are created BEFORE default inbound blocking is enabled.
-    Set-NetFirewallProfile -PolicyStore PersistentStore -Profile Domain,Private,Public `
+    $currentProfiles = @(Get-NetFirewallProfile -PolicyStore PersistentStore -ErrorAction Stop)
+    foreach ($profile in $originalProfiles) {
+        $current = @($currentProfiles | Where-Object Name -eq $profile.Name)
+        if ($current.Count -ne 1 -or "$($current[0].Enabled)" -ne $profile.Enabled -or
+            "$($current[0].DefaultInboundAction)" -ne $profile.DefaultInboundAction -or
+            "$($current[0].DefaultOutboundAction)" -ne $profile.DefaultOutboundAction) {
+            throw "Local firewall profile $($profile.Name) changed during apply; refusing to overwrite it."
+        }
+    }
+    [IO.File]::WriteAllText((Join-Path $run 'profile-apply-started'), '')
+    Set-NetFirewallProfile -PolicyStore PersistentStore -Name Domain,Private,Public `
         -Enabled True -DefaultInboundAction Block -DefaultOutboundAction Allow -ErrorAction Stop
     $active = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop)
     if ($active.Count -ne 3 -or @($active | Where-Object {

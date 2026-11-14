@@ -518,8 +518,8 @@ disabled = 0
 renderXml = true
 index = wineventlog
 sourcetype = XmlWinEventLog:Security
-start_from = newest
-current_only = 0
+start_from = oldest
+current_only = 1
 checkpointInterval = 5
 ```
 
@@ -530,8 +530,8 @@ checkpointInterval = 5
 | `renderXml = true` | Send XML event structure; field extraction still needs appropriate Splunk knowledge objects/add-on |
 | `index` | `sysmon` for the selected Sysmon channel; `wineventlog` for the others |
 | `sourcetype` | Explicit `XmlWinEventLog:<channel>`; preserve this when writing searches |
-| `start_from = newest` | Select the newest starting position for a fresh subscription; do not rely on this workflow for complete historical backfill |
-| `current_only = 0` | Do not configure current-only collection; input checkpoints/recovery behavior still matters |
+| `start_from = oldest` | Read in time order; Splunk documents `newest` with `current_only = 1` as collecting nothing |
+| `current_only = 1` | Collect only events that arrive while the forwarder runs: no historical backlog and no duplicates, but events written while it is stopped are missed |
 | `checkpointInterval = 5` | Configure frequent event-input checkpoint updates |
 
 Existing checkpoints, installed UF behavior and event-log retention affect what

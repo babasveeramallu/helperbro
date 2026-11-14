@@ -26,6 +26,23 @@ and is not a Linux web-server installer. Review its plan and compatibility
 before choosing any `-Apply` category. TLS changes and application restarts
 can break scoring; coordinate them separately.
 
+## Database dependencies
+
+Identify the database engine and host, actual listening address, authorized
+application clients, service account, connection method and backup owner.
+Test a permitted application transaction before changing database access.
+MySQL/MariaDB and PostgreSQL are not interchangeable with SQL Server and may
+use different configuration paths and access controls.
+
+Do not blindly bind a database to localhost or restrict PostgreSQL access to
+local connections: a separate application host or scored check may need
+remote access. Likewise, don't run interactive database hardening tools or
+change passwords until dependencies, approved credential handling and rollback
+are established. Never copy example passwords into commands or reports. If an
+approved restriction is made, preserve the original configuration, validate
+the engine-specific syntax and reload procedure, then test the application
+and database authentication from each required client.
+
 ## Verify
 
 From an authorized client, request the actual hostname and path with a trusted

@@ -29,6 +29,58 @@ do not select `AD` on another machine. The firewall audit requires elevation.
 Its additive policy preserves existing allows and explicit blocks; it is not
 a strict allowlist. It must not be stacked with unrelated firewall scripts.
 
+## Review identity dependencies
+
+The audit reports several privileged groups, but group names in an inventory
+are not evidence of malicious membership and the list is not a complete
+privilege audit. Review direct and nested membership, delegated object rights,
+replication rights, service accounts and owners against an approved baseline.
+Do not remove accounts, groups or replication permissions solely because
+they look unfamiliar. Review DnsAdmins and certificate-related permissions
+where applicable, without assuming the presence of a group means its
+associated role is installed.
+
+Before requiring LDAP signing or channel binding, identify actual client and
+scoring dependencies and inspect Directory Service events on each relevant
+DC. Event 2887 summarizes unsigned binds when they occur; detailed 2889
+events require the appropriate diagnostic logging. An absent event alone does
+not prove all clients are compatible. See Microsoft's
+[LDAP signing guidance](https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/enable-ldap-signing-in-windows-server).
+Review effective Group Policy and record the original values and recovery
+procedure. The role script's `-HardenDcAuth` changes several settings together;
+it does not configure LDAP channel binding. Test all affected clients before
+and after any approved change.
+
+Review lockout and password policy with service and scoring owners; an
+aggressive lockout can be used to deny service. MFA, managed service
+accounts and privileged-access controls need a compatible deployment plan,
+not an automatic conversion during scoring. Protect administrative
+credentials and review sensitive event logs before forwarding or sharing them.
+
+## If certificate services or federation exist
+
+AD CS and AD FS are separate roles and are not implied by AD/DNS. Identify
+their actual hosts, owners and dependencies before applying their guidance.
+On the relevant Server host, `Get-WindowsFeature ADCS-Cert-Authority,ADFS-Federation`
+can help identify locally installed roles when Server Manager is available;
+it does not discover roles on other hosts.
+
+For AD CS, review CA administration and enrollment permissions, published
+templates, who can request or manage certificates, issued certificates and
+the recovery plan. Do not revoke certificates or modify templates without
+identifying affected services and testing recovery. See Microsoft's
+[CA security and audit guidance](https://learn.microsoft.com/en-us/windows-server/identity/ad-cs/secure-delegate-audit-certification-authority)
+and [template management guidance](https://learn.microsoft.com/en-us/windows-server/identity/ad-cs/manage-certificate-templates).
+
+For AD FS, inventory federation servers, trusted applications, service
+accounts, signing and decryption certificate protection, and logging. A
+compromised federation server can put authentication and signing keys at
+risk; investigate suspected compromise through the approved incident
+process. Do not export keys, rotate certificates or remove files without a
+recovery plan. Microsoft's [FoggyWeb analysis](https://www.microsoft.com/en-us/security/blog/2021/09/27/foggyweb-targeted-nobelium-malware-leads-to-persistent-backdoor/)
+describes one historical AD FS threat; lack of its indicators does not rule
+out compromise. See also [AD FS security guidance](https://learn.microsoft.com/en-us/windows-server/identity/ad-fs/deployment/best-practices-securing-ad-fs).
+
 ## Apply only after approval
 
 Run `harden-addns.ps1` with a reviewed category and `-WhatIf` first. The

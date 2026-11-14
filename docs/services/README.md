@@ -19,6 +19,9 @@ event rules and service owner before acting.
 | Palo Alto firewall | [Palo Alto](palo-alto.md) |
 | VyOS router | [VyOS](vyos.md) |
 
+For Linux triage and a staged review of jobs, services and ports, see
+[Linux service and persistence review](linux-service-review.md).
+
 ## Shared preflight
 
 1. Verify the current host, OS, address, service owner, official access,

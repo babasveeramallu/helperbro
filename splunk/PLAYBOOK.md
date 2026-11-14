@@ -295,17 +295,20 @@ Check those again immediately afterward.
 
 Run from the repository root containing the `splunk` directory, **not** from
 inside that directory. If you copied only that directory, omit the leading
-`.\splunk\` from the commands.
+`.\splunk\` from the commands. Set `$Indexer` and `$Port` to the verified
+receiver and forwarder receiving port in each PowerShell session before
+running audit, installer, apply or verification commands. Use the same values
+throughout.
 
 ```powershell
 # AD host
-.\splunk\Set-WindowsForwarder.ps1 -Role AD -AuditOnly
+.\splunk\Set-WindowsForwarder.ps1 -Role AD -Indexer $Indexer -Port $Port -AuditOnly
 
 # MSSQL host
-.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -AuditOnly
+.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -Indexer $Indexer -Port $Port -AuditOnly
 
 # Windows 11 workstation
-.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -AuditOnly
+.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -Indexer $Indexer -Port $Port -AuditOnly
 ```
 
 Run only the matching line on each machine. The `AD` role is refused on a non-DC;
@@ -323,7 +326,7 @@ $msi = 'C:\Staging\splunkforwarder-approved-x64.msi'
 Get-AuthenticodeSignature -LiteralPath $msi
 Get-FileHash -LiteralPath $msi -Algorithm SHA256
 
-.\splunk\Set-WindowsForwarder.ps1 -Role AD -InstallerPath $msi -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role AD -Indexer $Indexer -Port $Port -InstallerPath $msi -AllowPlaintext
 ```
 
 Change `AD` to `MSSQL` or `Wkst` on the other machines. Optionally add
@@ -360,9 +363,9 @@ Once audit output and prerequisites are understood:
 
 ```powershell
 # Use the appropriate command on its corresponding host:
-.\splunk\Set-WindowsForwarder.ps1 -Role AD -AllowPlaintext
-.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -AllowPlaintext
-.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role AD -Indexer $Indexer -Port $Port -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -Indexer $Indexer -Port $Port -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -Indexer $Indexer -Port $Port -AllowPlaintext
 ```
 
 Confirm the PowerShell change prompt. Complete verification for that host before
@@ -441,9 +444,9 @@ $logs = @(
     'C:\SQLLogs\InstanceA\ERRORLOG',
     'D:\SQLLogs\InstanceB\ERRORLOG'
 )
-.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -SqlLogPath $logs -AuditOnly
+.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -Indexer $Indexer -Port $Port -SqlLogPath $logs -AuditOnly
 # After reviewing the result:
-.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -SqlLogPath $logs -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -Indexer $Indexer -Port $Port -SqlLogPath $logs -AllowPlaintext
 ```
 
 Those are example paths, not directories the script creates. Use actual paths.
@@ -621,9 +624,12 @@ generated event searchable centrally. Only the third proves that source's path.
 
 ### A. Debian readiness and scoring
 
+In the current shell, set `SPLUNK_PORT` to the verified forwarder receiving
+port used during setup before checking the listener.
+
 ```bash
 sudo systemctl is-active Splunkd
-sudo ss -ltnp 'sport = :9997'
+sudo ss -ltnp "sport = :${SPLUNK_PORT:?Set SPLUNK_PORT to the verified receiving port}"
 sudo /opt/splunk/bin/splunk btool inputs list --debug
 sudo /opt/splunk/bin/splunk btool indexes list --debug
 sudo tail -n 100 /opt/splunk/var/log/splunk/splunkd.log
@@ -635,12 +641,15 @@ scoring status in the portal after its restart; an active unit alone is insuffic
 
 ### B. Windows service, routing and source checks
 
+In each PowerShell session, set `$Indexer` and `$Port` to the verified receiver
+and forwarder receiving port used during setup before running these commands.
+
 ```powershell
 $uf = 'C:\Program Files\SplunkUniversalForwarder'
 Get-Service SplunkForwarder
 Get-CimInstance Win32_Service -Filter "Name='SplunkForwarder'" |
     Select-Object State, StartName, StartMode
-Test-NetConnection 172.20.240.20 -Port 9997
+Test-NetConnection $Indexer -Port $Port
 & "$uf\bin\splunk.exe" btool outputs list --debug
 & "$uf\bin\splunk.exe" btool inputs list --debug
 & "$uf\bin\splunk.exe" list forward-server

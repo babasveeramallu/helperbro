@@ -13,6 +13,7 @@ parameter, expected results, troubleshooting, rollback boundaries, and handoff.
 
 | Need | Read |
 |---|---|
+| Deploy or verify a specific service | [Service deployment guides](docs/services/README.md) |
 | Deploy telemetry on your three assigned Windows hosts | [Your deployment order](#your-deployment-order) |
 | Understand exactly what the forwarding scripts do | [Detailed Splunk playbook](splunk/PLAYBOOK.md) |
 | Add packet-aware Windows firewalls and opt-in detection decoys | [Windows defense playbook](windows/DEFENSE-PLAYBOOK.md) |
@@ -408,24 +409,26 @@ Do not configure a separate forwarding destination/deployment server in the wiza
 this script will configure the destination. `-Force` skips script confirmation,
 **not** the interactive installer.
 
-From the repository root on the appropriate machine:
+From the repository root on the appropriate machine, set `$Indexer` and `$Port`
+to the verified receiver address and forwarder receiving port in the current
+PowerShell session. Use the same values for audit, installation and apply:
 
 ```powershell
 # AD host (172.20.240.100)
-.\splunk\Set-WindowsForwarder.ps1 -Role AD -AuditOnly
-.\splunk\Set-WindowsForwarder.ps1 -Role AD -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role AD -Indexer $Indexer -Port $Port -AuditOnly
+.\splunk\Set-WindowsForwarder.ps1 -Role AD -Indexer $Indexer -Port $Port -AllowPlaintext
 
 # MSSQL host (172.20.240.120)
-.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -AuditOnly
-.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -Indexer $Indexer -Port $Port -AuditOnly
+.\splunk\Set-WindowsForwarder.ps1 -Role MSSQL -Indexer $Indexer -Port $Port -AllowPlaintext
 
 # Windows 11 workstation (DHCP)
-.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -AuditOnly
-.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -Indexer $Indexer -Port $Port -AuditOnly
+.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -Indexer $Indexer -Port $Port -AllowPlaintext
 
 # If UF is not installed yet, supply the ACTUAL staged installer filename:
 $msi = 'C:\Staging\splunkforwarder-approved-x64.msi'
-.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -InstallerPath $msi -AllowPlaintext
+.\splunk\Set-WindowsForwarder.ps1 -Role Wkst -Indexer $Indexer -Port $Port -InstallerPath $msi -AllowPlaintext
 ```
 
 All three profiles default to `172.20.240.20:9997`; override `-Indexer`/`-Port` if
@@ -478,12 +481,14 @@ Expected results and troubleshooting:
 [Verification procedure](splunk/PLAYBOOK.md#7-prove-end-to-end-delivery) and
 [troubleshooting matrix](splunk/PLAYBOOK.md#8-troubleshooting-by-symptom).
 
-On each Windows host, after installation/configuration:
+On each Windows host, after installation/configuration, set `$Indexer` and
+`$Port` in the current PowerShell session to the verified receiver and
+forwarder receiving port used during setup:
 
 ```powershell
 $uf = 'C:\Program Files\SplunkUniversalForwarder'
 Get-Service SplunkForwarder
-Test-NetConnection 172.20.240.20 -Port 9997
+Test-NetConnection $Indexer -Port $Port
 & "$uf\bin\splunk.exe" btool outputs list --debug
 & "$uf\bin\splunk.exe" btool inputs list --debug
 & "$uf\bin\splunk.exe" list forward-server

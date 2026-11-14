@@ -34,7 +34,10 @@ for distro in rocky almalinux rhel fedora centos ol; do
         grep -Fq 'OPTIONAL LOCKOUT ONLY' "$tmp/report"
         grep -Fq 'no PAM policy was applied' "$tmp/report"
         grep -Fq 'sudo cp -a "$backup/login.defs" /etc/login.defs' "$tmp/report"
-        ! grep -Eq '^INFO sudo authselect select|^CHANGE ' "$tmp/report"
+        if grep -Eq '^INFO sudo authselect select|^CHANGE ' "$tmp/report"; then
+            echo "Unexpected profile selection or applied change for $distro apply=$apply" >&2
+            exit 1
+        fi
         [[ ! -e "$tmp/unexpected" ]]
         printf 'PASS %s apply=%s guidance only\n' "$distro" "$apply"
     done
@@ -46,7 +49,10 @@ code=0
 configure_account_policy > "$tmp/output" || code=$?
 [[ "$code" == 2 ]]
 grep -Fq 'detected unsupported' "$tmp/report"
-! grep -Fq 'MANUAL ACTION REQUIRED' "$tmp/report"
+if grep -Fq 'MANUAL ACTION REQUIRED' "$tmp/report"; then
+    echo 'RHEL guidance leaked into the unsupported-distribution route' >&2
+    exit 1
+fi
 [[ ! -e "$tmp/unexpected" ]]
 echo 'PASS unsupported distribution still refused'
 
@@ -57,7 +63,10 @@ for distro in debian ubuntu; do
     configure_account_policy > "$tmp/output" || code=$?
     [[ "$code" == 2 ]]
     grep -Fq 'authselect-managed PAM detected' "$tmp/report"
-    ! grep -Fq 'MANUAL ACTION REQUIRED' "$tmp/report"
+    if grep -Fq 'MANUAL ACTION REQUIRED' "$tmp/report"; then
+        echo "RHEL guidance leaked into the $distro route" >&2
+        exit 1
+    fi
     [[ ! -e "$tmp/unexpected" ]]
     printf 'PASS %s authselect-managed guard preserved\n' "$distro"
 done

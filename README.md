@@ -81,7 +81,11 @@ generic management-only firewall assumptions.
 
 Apply one host at a time after review, then perform external scoring/admin/Splunk
 checks and run the printed commit command **before the default 10-minute
-deadline**. Otherwise the SYSTEM task attempts to restore the pre-change policy.
+deadline**. Otherwise the SYSTEM task attempts to remove that run's rules and
+restore the local profile fields it changed, without importing the full snapshot.
+Local fields originally `NotConfigured` cannot be safely restored through this
+path: run rules are still removed, but recovery reports failure and keeps the
+run pending for manual recovery. See the [recovery limits](windows/DEFENSE-PLAYBOOK.md).
 Existing broad inbound allows remain: this is not a strict allowlist. AD retains
 the standard dynamic RPC range. Outbound default stays Allow.
 
@@ -581,6 +585,13 @@ and does not change DNS or system settings:
 
 It does not establish compatibility or validate changes on a live domain controller.
 
+The Windows password recovery regression test uses synthetic credentials and
+mocked account changes; it does not rotate real accounts:
+
+```powershell
+.\windows\Test-RotatedCredentials.ps1
+```
+
 For the Splunk workflow, use the included offline tests from the repository root:
 
 ```powershell
@@ -625,9 +636,11 @@ Nothing rotates passwords automatically, so `auto-harden.ps1` never generates an
 ```
 
 - At least one `-IncludeAccount` and two `-ExcludeAccount` values are required, and you must type a confirmation.
-- New passwords are written to `%LOCALAPPDATA%\CCDC\Reports\rotated-credentials-<stamp>.txt` (for example `C:\Users\kali\AppData\Local\CCDC\Reports`). The file is readable only by the current user and SYSTEM. A `password-rotation-ledger.txt` records what was rotated.
-- Passwords in the file are obfuscated (XOR + Base64, prefixed `obf:`), so they are not readable at a glance. This is obfuscation, not encryption: anyone with the scripts can decode it. View them on screen with `.\windows\Show-RotatedCredentials.ps1` (latest file, or pass `-Path`). Record them in your team's secure store, then delete the file.
-- Rotating the account you are logged in as is risky: write the new password down before logging out. Keep scoring and break-glass accounts excluded.
+- New passwords are encrypted with Windows current-user DPAPI and saved before each change in `%LOCALAPPDATA%\CCDC\Reports\rotated-credentials-<stamp>.txt`, or in `-ReportDirectory` if specified. The file ACL permits the current user and SYSTEM. A separate `password-rotation-ledger.txt` records what was rotated.
+- From the same Windows account and machine, run `.\windows\Show-RotatedCredentials.ps1` (latest default-directory file, or pass `-Path` for another directory). Save the passwords in your team's secure store, then type `DELETE` at the prompt to remove the file; any other response retains it. Alternatively, set `$CredentialFile` to the full file path and run `Remove-Item -LiteralPath $CredentialFile`. Securely handle backups and transcripts too. A `PENDING` entry may have been applied if execution was interrupted; verify its status before using it.
+- DPAPI is not protection against a compromised session, administrator/SYSTEM access, or applicable domain recovery mechanisms. Account/profile loss or a password reset can make the file unreadable. The script refuses to rotate the current account; use a different administrator. Keep scoring and break-glass accounts excluded.
+- Older `rotated-credentials-*.txt` files containing `obf:` entries are insecure and are not decoded by the updated viewer. Treat their passwords as exposed, rotate them again safely if needed, and securely remove those files and any copies. The update does not remove existing files automatically.
+- If an interrupted write leaves a malformed or undecryptable entry, the viewer still displays other readable credentials, then reports failure and retains the file without offering deletion. Recover those credentials securely and investigate the incomplete entry.
 
 ### After a hardening run
 - **Reboot:** required for LSASS protection (RunAsPPL) to take effect.

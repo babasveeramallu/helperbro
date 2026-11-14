@@ -11,6 +11,7 @@ param(
     [ValidateRange(1,999)][int]$LockoutThreshold = 5,
     [ValidateRange(1,99999)][int]$LockoutDurationMinutes = 30,
     [ValidateRange(1,99999)][int]$LockoutObservationWindowMinutes = 30,
+    [ValidateRange(1,999)][int]$MaxPasswordAgeDays,
     [switch]$EnforceHostFirewall,
     [switch]$DisableUsbStorage,
     [switch]$RequireSmbSigning,
@@ -86,6 +87,7 @@ try {
     if (-not $EnableAccountLockout -and @('LockoutThreshold','LockoutDurationMinutes','LockoutObservationWindowMinutes' |
         Where-Object { $PSBoundParameters.ContainsKey($_) }).Count) { throw 'Lockout parameters require -EnableAccountLockout.' }
     if ($EnableAccountLockout -and $LockoutObservationWindowMinutes -gt $LockoutDurationMinutes) { throw 'Lockout observation window cannot exceed lockout duration.' }
+    if ($PSBoundParameters.ContainsKey('MaxPasswordAgeDays') -and -not $SetAccountPolicy) { throw '-MaxPasswordAgeDays requires -SetAccountPolicy.' }
     if (($ScopeManagementPorts -or $ScopeSystemPorts -or $DisableExistingInboundAllows) -and -not $EnforceHostFirewall) {
         throw 'Firewall narrowing switches require -EnforceHostFirewall.'
     }
@@ -114,7 +116,8 @@ try {
         if ($DisableLegacyProtocols) { Write-Log FLAG 'PLAN ONLY: would disable SMBv1, LLMNR, and NetBIOS over TCP/IP using local registry/features.' }
         if ($KillPersistence) { foreach ($name in $DisableTask) { Write-Log FLAG "PLAN ONLY: would disable exact scheduled task $name after ShouldProcess confirmation." } }
         if ($SetAccountPolicy) {
-            Write-Log FLAG "PLAN ONLY: would set account policy via $(if ($computer.PartOfDomain) {'Active Directory default domain policy'} else {'net accounts + secedit local security policy'}). Existing lockout settings preserved unless explicitly selected."
+            Write-Log FLAG "PLAN ONLY: would set account policy via $(if ($computer.PartOfDomain) {'Active Directory default domain policy'} else {'net accounts + secedit local security policy'}). Existing lockout settings and maximum password age preserved unless explicitly selected."
+            if ($PSBoundParameters.ContainsKey('MaxPasswordAgeDays')) { Write-Log FLAG "PLAN ONLY: would set maximum password age to $MaxPasswordAgeDays days; older passwords must be changed at next logon, which can break scored logins." }
             if ($EnableAccountLockout) { Write-Log FLAG "PLAN ONLY: would set lockout threshold=$LockoutThreshold duration=$LockoutDurationMinutes minutes window=$LockoutObservationWindowMinutes minutes; intentional lockouts can deny service." }
         }
         if ($EnforceHostFirewall) { Write-Log FLAG "PLAN ONLY: would set profile defaults inbound=Block and allow detected service listeners; disable existing allows=$DisableExistingInboundAllows; scope management=$ScopeManagementPorts; scope system=$ScopeSystemPorts; ranges=$($ManagementRange -join ',')." }
@@ -142,6 +145,7 @@ try {
             $policyParameters.LockoutDurationMinutes=$LockoutDurationMinutes
             $policyParameters.LockoutObservationWindowMinutes=$LockoutObservationWindowMinutes
         }
+        if ($PSBoundParameters.ContainsKey('MaxPasswordAgeDays')) { $policyParameters.MaxPasswordAgeDays=$MaxPasswordAgeDays }
         Set-CCDCAccountPolicy @policyParameters
     }
     if ($applyChanges -and $EnforceHostFirewall) { Set-CCDCWindowsFirewall -ManagementRange $ManagementRange -ScopeSystemPorts:$ScopeSystemPorts -ScopeManagementPorts:$ScopeManagementPorts -DisableExistingInboundAllows:$DisableExistingInboundAllows }

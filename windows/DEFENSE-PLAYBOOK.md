@@ -41,8 +41,8 @@ as if this document were approval.
 2. Record current scoring, remote administration and Splunk receipt from each host.
 3. Keep NETLAB console access. Practice on noncompetition VMs first.
 4. Coordinate a short firewall-change window with the network/system owners.
-5. Keep other firewall edits paused until the run is committed or reverted:
-   rollback imports the **entire pre-change local firewall policy**.
+5. Coordinate edits to firewall profile settings until the run is committed or
+   reverted. Older pending runs may still restore the entire firewall snapshot.
 6. Do not stack this script with the older auto-hardening/host-firewall scripts.
 7. Retain the complete `windows` directory including its `lib` helpers.
 8. Use **x64 elevated Windows PowerShell 5.1 or x64 PowerShell 7**.
@@ -216,7 +216,7 @@ $run = 'C:\ProgramData\CCDC\Firewall\run-ACTUAL_GUID'
 
 The helper takes an exclusive lock, refuses confirmation after the deadline,
 writes `Committed`, then unregisters its rollback task. A racing timer cannot
-import the policy after seeing terminal Committed state.
+roll back the run after seeing terminal Committed state.
 
 If a check fails, revert immediately:
 
@@ -224,10 +224,10 @@ If a check fails, revert immediately:
 & "$run\Invoke-PacketFirewallRecovery.ps1" -RunDirectory $run -Action Revert
 ```
 
-If connectivity is lost, the independent scheduled task attempts to restore the
-snapshot at the deadline. It does not depend on the originating PowerShell
+If connectivity is lost, the independent scheduled task attempts a scoped
+rollback at the deadline. It does not depend on the originating PowerShell
 window staying open. Keep console access: Task Scheduler, SYSTEM privileges,
-backup integrity, disk health and local Windows services must still work.
+run metadata, disk health and local Windows services must still work.
 Administrative attackers can disable a task; this is an operational safety net,
 not tamper-proof containment.
 
@@ -239,6 +239,7 @@ not tamper-proof containment.
     audit.json
     state.json
     operation.lock
+    profile-apply-started   # created immediately before profile changes
     Invoke-PacketFirewallRecovery.ps1
     lib\PacketDefense.ps1
 ```
@@ -247,26 +248,50 @@ The leaf run directory grants SYSTEM and built-in Administrators full access
 and disables inherited access. Use a trusted administrator-controlled parent.
 Do not move/edit these files while the timer is armed.
 
-The state records deadline, computer/role, task name, backup hash and one of
-Pending/Committed/Reverted. The checksum detects backup corruption; it is not
+The state records deadline, computer/role, task name, exact per-run rule names,
+original local profile fields, backup hash and one of Pending/Committed/Reverted.
+The backup is retained for separate manual disaster recovery, not imported by
+the new automatic rollback. Its checksum detects backup corruption; it is not
 protection against an administrator who can replace both state and backup.
 The audit is pre-change evidence, not a full transcript of every command.
 An arming failure before any policy changes is also marked Reverted and its
 unused task is removed where possible; review the reported failure rather than
 treating that status as a successful apply. Recovery supports `-AuditOnly`
-to inspect a saved run without importing policy or canceling its task.
+to inspect a saved run without changing policy or canceling its task.
 
-Rollback imports the **whole exported local firewall policy**, including profile
-settings. Concurrent legitimate changes made after export can be lost. It cannot
-override centrally enforced GPO policy. Apply errors trigger an immediate
-restore attempt; if that fails, the scheduled task remains the fallback.
-Inspect reported failures rather than assuming rollback succeeded.
+New runs remove only their own uniquely named rules and restore the local
+Enabled, DefaultInboundAction and DefaultOutboundAction fields they changed.
+Other rules and profile fields are left alone. If a changed field has since
+been set to a third value, rollback refuses to overwrite it and leaves the
+task registered for retry; investigate promptly from the console. Coordinate
+edits to those same fields: checks and writes are not atomic with other tools.
 
-Once committed, a later apply can refresh this script's owned rule names without
-duplicating them; it creates a new snapshot/timer and needs fresh confirmation.
-Rules added by a prior run but omitted from a later plan are preserved, not
-automatically pruned. Do not change roles casually. Outstanding/failed tasks
+Microsoft documents `NotConfigured` writes for these fields as GPO-only
+([Set-NetFirewallProfile](https://learn.microsoft.com/en-us/powershell/module/netsecurity/set-netfirewallprofile)).
+If a saved local field was `NotConfigured`, recovery does not submit that value
+to `PersistentStore` or guess a replacement. It restores supported fields and
+removes the run's rules, then fails with the affected profile/field names.
+Those fields remain at the applied values; the state stays `Pending` and the
+watchdog stays registered. Repeated retries cannot resolve this limitation.
+Inspect the saved state and actual policy from the console and coordinate manual
+recovery; do not assume the previous defaults or connectivity have been restored.
+Rollback cannot override centrally enforced GPO policy. Apply errors trigger an
+immediate rollback attempt; if that fails, the scheduled task remains the
+fallback, subject to its retry limit. Inspect failures rather than assuming
+rollback succeeded.
+
+Each later apply creates additional run-specific rules and needs fresh
+confirmation. Earlier committed rules, including old deterministic baseline
+rules, are not refreshed or pruned automatically; review and remove obsolete
+rules deliberately. Do not change roles casually. Outstanding/failed tasks
 must be investigated or resolved before another apply.
+
+**Older pending runs:** each run contains its own recovery script. Runs created
+before scoped rollback still import their entire saved policy, potentially
+overwriting later changes. Coordinate and resolve those runs with their saved
+scripts before deploying this version; replacing an armed run's files is unsafe.
+Manually importing `before.wfw` also restores the entire snapshot and can
+overwrite later work; use it only as a separately authorized last resort.
 
 ## 7. Decoys: approval and audit
 

@@ -258,7 +258,7 @@ bash linux/first-hour.sh --apply-host-firewall --management-cidr 10.20.30.0/24
 Useful options:
 
 - `--apply`: execute requested changes. Must run as root. Destructive/lockout-sensitive actions require interactive typed confirmation.
-- `--set-account-policy`: plans or applies Debian/Ubuntu PAM password quality, history, faillock, and login.defs settings. Apply requires `pam_pwquality`, `pam_faillock`, a recognized Debian PAM layout, root, and an interactive terminal; it backs up files and verifies changes. Fedora/RHEL/Oracle Linux PAM changes are intentionally refused by this path.
+- `--set-account-policy`: plans or applies Debian/Ubuntu PAM password quality, history, faillock, and login.defs settings. Apply requires `pam_pwquality`, `pam_faillock`, a recognized Debian PAM layout, root, and an interactive terminal; it backs up files and verifies changes. Rocky/Alma/RHEL/Fedora/CentOS/Oracle Linux instead receive manual authselect-based commands in the console and report; no PAM changes are applied automatically, and the step exits nonzero (2, including audit mode) to signal required manual work.
 - `--apply-host-firewall` with `--management-cidr CIDR` or `--public-ssh`: audit or apply a host nftables firewall. Ping (IPv4 and IPv6) stays allowed. With `--management-cidr` (repeat for multiple ranges), SSH port 22 answers only those ranges; use this only when SSH is not a scored service on the host. With `--public-ssh`, SSH answers every source; use this when SSH is scored. Add `--skip-port tcp:PORT` or `udp:PORT` (repeatable) for any listener you do not recognize; explicit drop rules keep it closed, including existing connections. Skipping SSH can disconnect remote administration. Requires `ss`, `nft`, Python 3, and for apply: root, systemd, `systemd-run`, an interactive terminal, and a successful nft syntax check. A rollback timer is armed before applying.
 - `--disable-smbv1`: if Samba is installed, requires `crudini` and `testparm`, and asks for typed confirmation before changing Samba settings.
 - `--kill-persistence --remove-unit UNIT --remove-cron-file /etc/cron.d/FILE`: targets only explicitly named systemd units and regular non-symlink files under `/etc/cron.d`. Repeat target options as needed. Apply disables/masks units or removes the named cron files after confirmation.
@@ -302,6 +302,35 @@ sudo bash linux/apply-firewall.sh --apply --config linux/firewall.example.json
 Apply requires root, `nft`, `ss`, Python 3, a running systemd manager, and an interactive terminal. Just before applying, the script snapshots established TCP connections to authorized inbound services and permits their exact address/port tuples to send non-SYN ACK packets if conntrack initially sees them as new. These exceptions do not permit outbound SYNs and remain until the firewall table is removed. Connections created after the snapshot might still be interrupted. The script arms the configured rollback timer before applying. It defaults to drop for inbound and outbound traffic, so incomplete allowlists can break services or access. Keep the rollback armed until scoring and administration are verified. To keep the rules after verification, the script prints the exact systemd timer/service command; to roll back immediately, it prints the nft delete command.
 
 ### PAM helper
+
+On RHEL-family systems, run `sudo bash linux/first-hour.sh --set-account-policy`
+to record the manual procedure. It targets Rocky/RHEL 9 conventions; check the
+installed version's supported features before adapting it to other releases.
+The report includes package checks, backups, exact inspection/editor commands,
+configuration values, optional history/lockout feature commands, verification
+and console recovery instructions. Nonzero exit means the policy was **not**
+applied; later selected categories in that run will not proceed.
+
+Review the procedure step by step, not as one pasted script (the final commands
+are recovery commands, not normal apply steps). Replace existing active settings
+in the named configuration files with the listed values, one setting per line,
+and resolve conflicting PAM inline options. The procedure retains the current
+authselect profile and its features rather than forcibly switching identity
+providers to SSSD. If `authselect current` or `authselect check` fails, stop and
+consult the distribution's supported migration/custom-profile workflow; do not
+force-overwrite PAM or break domain identity.
+
+Password history requires the current profile to offer `with-pwhistory`; stop
+if it is unavailable. Lockout is a separately approved manual step because
+deliberate failed logins can deny service to scoring/service accounts.
+`login.defs` aging defaults do not update existing accounts. Keep console access,
+test only a disposable account, and protect the root-only backups.
+Run `bash linux/test-rhel-account-policy.sh` for fixture tests of report routing
+and printed-command syntax. No live Rocky authentication or PAM changes are
+validated by these tests.
+
+Authselect command reference:
+[upstream authselect manual](https://github.com/authselect/authselect/blob/master/src/man/authselect.8.adoc).
 
 `linux/pam_policy.py` is called by `first-hour.sh`; normally do not invoke it directly. It can be used for fixture-based testing with `--root` pointed at a disposable tree and a fresh `--backup-dir`. It edits only the listed PAM/login.defs files, rejects unrecognized PAM layouts and symlinked files, creates backups, verifies edits, and attempts rollback on failure.
 
@@ -647,6 +676,52 @@ Nothing rotates passwords automatically, so `auto-harden.ps1` never generates an
 - DPAPI is not protection against a compromised session, administrator/SYSTEM access, or applicable domain recovery mechanisms. Account/profile loss or a password reset can make the file unreadable. The script refuses to rotate the current account; use a different administrator. Keep scoring and break-glass accounts excluded.
 - Older `rotated-credentials-*.txt` files containing `obf:` entries are insecure and are not decoded by the updated viewer. Treat their passwords as exposed, rotate them again safely if needed, and securely remove those files and any copies. The update does not remove existing files automatically.
 - If an interrupted write leaves a malformed or undecryptable entry, the viewer still displays other readable credentials, then reports failure and retains the file without offering deletion. Recover those credentials securely and investigate the incomplete entry.
+
+### Standalone password rotation and fake credential files
+
+The former diagnostics-named helper has been replaced by
+[`windows\Rotate-LocalPasswords.ps1`](windows/Rotate-LocalPasswords.ps1).
+It requires elevated Windows PowerShell 5.1 or PowerShell 7 and changes only
+explicitly selected local accounts. It does not configure other hardening.
+Wildcard account selectors are refused. Relative store paths and directories
+resolve against the current PowerShell filesystem location.
+Exclude scoring, service, scheduled-task and break-glass accounts yourself;
+this helper does not discover their dependencies. Domain controllers are refused.
+
+```powershell
+.\windows\Rotate-LocalPasswords.ps1 -Account example-local-user -WhatIf
+.\windows\Rotate-LocalPasswords.ps1 -Account example-local-user
+.\windows\Rotate-LocalPasswords.ps1 -Action Show
+```
+
+The helper prompts for a passphrase and writes an ACL-restricted,
+passphrase-encrypted `local-passwords-*.dat` recovery store under
+`%LOCALAPPDATA%\helperbro\Credentials` (override with `-StoreDirectory`).
+The store is verified before any password changes. A failure during rotation
+can leave a partial result; check each account rather than assuming all changed.
+`-WhatIf` writes nothing and changes no accounts. Keep the passphrase in your
+team's secure store; losing it prevents recovery. After recording credentials
+securely, set `$StoreFile` to the actual store path and use
+`Remove-Item -LiteralPath $StoreFile`. Protect console transcripts as secrets.
+
+Existing encrypted files from the old helper remain readable using
+`-Action Show -StorePath <actual-file-path>` and their original passphrase.
+The new helper does not search, move, or delete files in the former storage
+location automatically. Record their contents securely, then remove those
+specific files and any copies; never delete a Windows directory to clean them up.
+
+The separate [`windows\New-DecoyCredentialFile.ps1`](windows/New-DecoyCredentialFile.ps1)
+writes clearly labeled **fake** values under `%LOCALAPPDATA%\helperbro\Decoys`;
+it never reads or changes account passwords. Use only for an approved defensive
+exercise. It supports `-WhatIf`, confirmation and `-OutputDirectory`. It does
+not install monitoring or detect access to its output.
+
+Run `.\windows\Test-LocalPasswordTools.ps1` for synthetic recovery-store and
+mocked rotation/decoy tests; no real accounts are changed. These checks do not
+prove that Defender will accept a fresh clone. Validate a fresh download on a
+Windows 11 test VM with current Defender real-time protection enabled. Do not
+disable Defender, add exclusions, or restore a quarantined file merely to make
+the tool run; investigate any detection through your normal security process.
 
 ### After a hardening run
 - **Reboot:** required for LSASS protection (RunAsPPL) to take effect.

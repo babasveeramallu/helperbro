@@ -154,10 +154,71 @@ configure_host_firewall() {
     log INFO 'Verify ping, every scored service and your own SSH access from another machine before cancelling rollback.'
 }
 
+rhel_account_policy_guidance() {
+    log FLAG 'MANUAL ACTION REQUIRED: RHEL-family PAM was not changed. Review these Rocky/RHEL 9 commands from a root-capable console; do not paste the whole procedure blindly.'
+    while IFS= read -r line; do log INFO "$line"; done <<'RHEL_GUIDANCE'
+# Keep an authenticated console and a second session; verify package availability offline if necessary.
+rpm -q authselect pam libpwquality
+# If packages are missing, install from approved repositories/media before continuing:
+sudo dnf install authselect pam libpwquality
+sudo authselect current
+sudo authselect check
+# STOP on either failure. Do not select sssd or use --force: preserve the current identity provider and features.
+backup="/root/helperbro-pam-$(date +%Y%m%d-%H%M%S)"
+sudo install -d -m 700 "$backup"
+sudo cp -a /etc/pam.d /etc/authselect /etc/security /etc/login.defs "$backup/"
+sudo authselect current --raw | sudo tee "$backup/authselect-current.txt"
+# Edit these files; put each listed setting on its own line, replace active duplicate keys, preserve unrelated settings, and review PAM inline overrides.
+sudoedit /etc/security/pwquality.conf
+# Set: minlen = 8 ; ucredit = -1 ; lcredit = -1 ; dcredit = -1 ; ocredit = -1
+sudoedit /etc/login.defs
+# Set: PASS_MAX_DAYS 60 ; PASS_MIN_DAYS 7 ; PASS_WARN_AGE 7
+# login.defs affects newly created accounts. Do not mass-expire existing service/scoring accounts.
+sudo grep -nE 'pam_(pwquality|pwhistory|faillock)\.so' /etc/pam.d/system-auth /etc/pam.d/password-auth
+# Confirm pam_pwquality is present and not overridden by inline PAM options; do not edit authselect-generated PAM directly.
+# For password history, first confirm with-pwhistory is offered for your CURRENT profile:
+sudo authselect current --raw
+# Retain the selected profile, including custom profiles; this only lists supported features:
+current_profile="$(sudo authselect current --raw)"
+sudo authselect list-features "${current_profile%% *}"
+# Only if with-pwhistory is listed; otherwise STOP and use the distribution's custom-profile procedure.
+sudoedit /etc/security/pwhistory.conf
+# Set: remember = 5
+sudo authselect enable-feature with-pwhistory --backup="helperbro-history-$(date +%Y%m%d-%H%M%S)"
+# OPTIONAL LOCKOUT ONLY: deliberate failures can deny service by locking scoring/service accounts.
+# Do not enable lockout unless that tradeoff is approved and with-faillock is listed for the current profile.
+sudoedit /etc/security/faillock.conf
+# Set: deny = 5 ; fail_interval = 900 ; unlock_time = 1800
+sudo authselect enable-feature with-faillock --backup="helperbro-faillock-$(date +%Y%m%d-%H%M%S)"
+# Verify before closing your original console/session:
+sudo authselect check
+sudo authselect current
+sudo grep -nE 'pam_(pwquality|pwhistory|faillock)\.so' /etc/pam.d/system-auth /etc/pam.d/password-auth
+sudo grep -nE '^[[:space:]]*(minlen|ucredit|lcredit|dcredit|ocredit|remember|deny|fail_interval|unlock_time)[[:space:]]*=' /etc/security/pwquality.conf /etc/security/pwhistory.conf /etc/security/faillock.conf
+sudo grep -nE '^[[:space:]]*PASS_(MAX_DAYS|MIN_DAYS|WARN_AGE)[[:space:]]' /etc/login.defs
+# Use only a disposable test account for password-change, fresh-login, history and optional lockout tests.
+# Recovery, from console: restore only these backed-up authentication paths; later changes to them will be overwritten.
+sudo cp -a "$backup/pam.d/." /etc/pam.d/
+sudo cp -a "$backup/authselect/." /etc/authselect/
+sudo cp -a "$backup/security/." /etc/security/
+sudo cp -a "$backup/login.defs" /etc/login.defs
+# Remove only any specific configuration file newly created by this procedure if it did not exist in the backup.
+sudo restorecon -RF /etc/pam.d /etc/authselect /etc/security /etc/login.defs
+sudo authselect check
+RHEL_GUIDANCE
+}
+
 configure_account_policy() {
     [[ -r /etc/os-release ]] || { log ERROR 'Cannot identify Linux distribution; PAM policy not changed.'; return 2; }
     . /etc/os-release
-    case "${ID:-}" in debian|ubuntu) ;; *) log ERROR "Automatic PAM edits support Debian/Ubuntu only; detected ${ID:-unknown}. No files changed."; return 2 ;; esac
+    case "${ID:-}" in
+        debian|ubuntu) ;;
+        rocky|almalinux|rhel|fedora|centos|ol)
+            rhel_account_policy_guidance
+            log ERROR "Automatic PAM edits remain Debian/Ubuntu-only; detected ${ID}. Manual commands are in this report; no PAM policy was applied."
+            return 2 ;;
+        *) log ERROR "Automatic PAM edits support Debian/Ubuntu only; detected ${ID:-unknown}. No files changed."; return 2 ;;
+    esac
     if command -v authselect >/dev/null 2>&1; then log ERROR 'authselect-managed PAM detected; use the distribution profile workflow. No files changed.'; return 2; fi
     for file in /etc/pam.d/common-auth /etc/pam.d/common-account /etc/pam.d/common-password /etc/login.defs; do
         [[ -f "$file" && ! -L "$file" ]] || { log ERROR "Missing/linked PAM file $file; refusing direct edits."; return 2; }

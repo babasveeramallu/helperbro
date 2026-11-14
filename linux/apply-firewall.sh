@@ -86,7 +86,7 @@ for item in cfg.get("outbound_allow", []):
     net = ipaddress.ip_network(item["destination"], strict=False)
     fam = "ip" if net.version == 4 else "ip6"
     out.append(f"  {fam} daddr {net} {item['protocol']} dport {int(item['port'])} accept")
-out += ["  meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept", "  reject", " }", " chain forward { type filter hook forward priority -10; policy drop; }", "}"]
+out += ["  meta l4proto ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert } accept", "  reject", " }", "}"]  # input only: a forward drop would break Docker-published ports and routed traffic
 open(sys.argv[2], "w", encoding="utf-8").write("\n".join(out) + "\n")
 PY
 }

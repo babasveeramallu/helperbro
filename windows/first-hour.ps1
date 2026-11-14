@@ -7,6 +7,10 @@ param(
     [switch]$DisableLegacyProtocols,
     [switch]$KillPersistence,
     [switch]$SetAccountPolicy,
+    [switch]$EnableAccountLockout,
+    [ValidateRange(1,999)][int]$LockoutThreshold = 5,
+    [ValidateRange(1,99999)][int]$LockoutDurationMinutes = 30,
+    [ValidateRange(1,99999)][int]$LockoutObservationWindowMinutes = 30,
     [switch]$EnforceHostFirewall,
     [switch]$DisableUsbStorage,
     [switch]$RequireSmbSigning,
@@ -76,6 +80,10 @@ try {
     }
     if ($KillPersistence -and $DisableTask.Count -eq 0) { throw '-KillPersistence plan/apply requires exact -DisableTask task paths.' }
     if ($InstallSysmon -and (-not $SysinternalsPath -or -not $SysmonConfig)) { throw '-InstallSysmon requires -SysinternalsPath and -SysmonConfig.' }
+    if ($EnableAccountLockout -and -not $SetAccountPolicy) { throw '-EnableAccountLockout requires -SetAccountPolicy.' }
+    if (-not $EnableAccountLockout -and @('LockoutThreshold','LockoutDurationMinutes','LockoutObservationWindowMinutes' |
+        Where-Object { $PSBoundParameters.ContainsKey($_) }).Count) { throw 'Lockout parameters require -EnableAccountLockout.' }
+    if ($EnableAccountLockout -and $LockoutObservationWindowMinutes -gt $LockoutDurationMinutes) { throw 'Lockout observation window cannot exceed lockout duration.' }
     if ($EnforceHostFirewall) {
         if ($ManagementRange.Count -eq 0) { throw '-EnforceHostFirewall requires -ManagementRange CIDR(s); no firewall changes made.' }
         foreach ($range in $ManagementRange) {
@@ -100,7 +108,10 @@ try {
         if ($RotateBuiltInAdministrator) { Write-Log FLAG 'PLAN ONLY: would rotate the built-in Administrator last, after other selected accounts.' }
         if ($DisableLegacyProtocols) { Write-Log FLAG 'PLAN ONLY: would disable SMBv1, LLMNR, and NetBIOS over TCP/IP using local registry/features.' }
         if ($KillPersistence) { foreach ($name in $DisableTask) { Write-Log FLAG "PLAN ONLY: would disable exact scheduled task $name after ShouldProcess confirmation." } }
-        if ($SetAccountPolicy) { Write-Log FLAG "PLAN ONLY: would set account policy via $(if ($computer.PartOfDomain) {'Active Directory default domain policy'} else {'net accounts + secedit local security policy'})." }
+        if ($SetAccountPolicy) {
+            Write-Log FLAG "PLAN ONLY: would set account policy via $(if ($computer.PartOfDomain) {'Active Directory default domain policy'} else {'net accounts + secedit local security policy'}). Existing lockout settings preserved unless explicitly selected."
+            if ($EnableAccountLockout) { Write-Log FLAG "PLAN ONLY: would set lockout threshold=$LockoutThreshold duration=$LockoutDurationMinutes minutes window=$LockoutObservationWindowMinutes minutes; intentional lockouts can deny service." }
+        }
         if ($EnforceHostFirewall) { Write-Log FLAG "PLAN ONLY: would set all profile defaults inbound=Block, allow detected service listeners, and scope RDP/WinRM to $($ManagementRange -join ',')." }
         if ($DisableUsbStorage) { Write-Log FLAG 'PLAN ONLY: would set USBSTOR Start=4 after reporting its current state.' }
         if ($RequireSmbSigning) { Write-Log FLAG 'PLAN ONLY: would require SMB signing on server and client.' }
@@ -118,7 +129,16 @@ try {
         if ($SkipRestorePoint) { Write-Log FLAG 'Restore point skipped by -SkipRestorePoint.' }
         else { New-CCDCRestorePoint -Description "CCDC first-hour BEFORE $stamp" }
     }
-    if ($applyChanges -and $SetAccountPolicy) { Set-CCDCAccountPolicy -IsDomainJoined ([bool]$computer.PartOfDomain) -ReportDirectory $ReportDirectory }
+    if ($applyChanges -and $SetAccountPolicy) {
+        $policyParameters = @{ IsDomainJoined=[bool]$computer.PartOfDomain; ReportDirectory=$ReportDirectory }
+        if ($EnableAccountLockout) {
+            $policyParameters.EnableAccountLockout=$true
+            $policyParameters.LockoutThreshold=$LockoutThreshold
+            $policyParameters.LockoutDurationMinutes=$LockoutDurationMinutes
+            $policyParameters.LockoutObservationWindowMinutes=$LockoutObservationWindowMinutes
+        }
+        Set-CCDCAccountPolicy @policyParameters
+    }
     if ($applyChanges -and $EnforceHostFirewall) { Set-CCDCWindowsFirewall -ManagementRange $ManagementRange -ScopeSystemPorts:$ScopeSystemPorts }
     if ($applyChanges -and $DisableUsbStorage) { Set-CCDCUsbStorage }
     if ($applyChanges -and $RequireSmbSigning) { Set-CCDCSmbSigning }

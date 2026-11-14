@@ -154,7 +154,9 @@ Options:
 - Supplying any change-category switch applies the selected categories by default. With no category switches, the script remains audit-only.
 - `-PlanOnly`: report the selected changes without applying them. Cannot be combined with `-Apply`.
 - `-Apply`: explicit apply mode retained for backward compatibility. High-impact operations use PowerShell `ShouldProcess` confirmation; `-WhatIf` can be used to preview ShouldProcess actions.
-- `-SetAccountPolicy`: configure local policy on standalone hosts or the AD default domain policy on a domain controller/domain-joined host. Domain mode requires RSAT ActiveDirectory tools. Review domain-wide impact first.
+- `-SetAccountPolicy`: configure password length (8), complexity, history (5) and maximum age (60 days) locally on standalone hosts or in the AD default domain policy on a domain controller/domain-joined host. Existing account lockout settings are preserved by default. Domain mode requires RSAT ActiveDirectory tools. Review domain-wide impact first.
+- `-EnableAccountLockout`: separate opt-in requiring `-SetAccountPolicy`. Parameters are `-LockoutThreshold` (1-999 attempts, default 5), `-LockoutDurationMinutes` (1-99999, default 30) and `-LockoutObservationWindowMinutes` (1-99999, default 30; cannot exceed duration). Lockout resists password guessing but lets anyone who can reach authentication deliberately lock scoring/service accounts and deny service. Coordinate with service owners before enabling it. `auto-harden.ps1` does not opt in or remove existing lockouts.
+
 - `-EnforceHostFirewall -ManagementRange CIDR`: set Windows Firewall inbound defaults to Block and allow discovered listeners; RDP/WinRM access is scoped to supplied management ranges. Provide the actual admin range or remote management may be lost.
 - `-DisableLegacyProtocols`: disable SMBv1, LLMNR, and NetBIOS over TCP/IP. Some changes may need a reboot.
 - `-DisableUsbStorage`: disable the USB mass-storage driver; it does not block every USB device class.
@@ -166,6 +168,15 @@ Options:
 - `-SysinternalsPath PATH`: optionally run available signed `autorunsc`, `tcpvcon`, `logonsessions`, `psloggedon`, `pipelist`, and `sigcheck` tools during the baseline snapshot. Stage and verify the Sysinternals Suite in advance; missing tools are skipped.
 - `-SkipRestorePoint`: skip before/after restore point attempts on supported client Windows. On Windows Server, take a VM snapshot and use this switch if running this general script with apply options.
 - `-ReportDirectory PATH`: change the default report location (`%LOCALAPPDATA%\CCDC\Reports`).
+
+For example, preview an explicitly selected lockout policy before applying:
+
+```powershell
+.\windows\first-hour.ps1 -PlanOnly -SetAccountPolicy -EnableAccountLockout -LockoutThreshold 11 -LockoutDurationMinutes 25 -LockoutObservationWindowMinutes 9
+```
+
+Run `.\windows\Test-AccountPolicy.ps1` for mocked local and domain policy tests.
+The tests do not alter real account policies or prove live domain compatibility.
 
 Password rotation example for plan-only mode (replace names; do not assume these are safe targets):
 

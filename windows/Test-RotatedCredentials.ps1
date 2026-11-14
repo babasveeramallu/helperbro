@@ -87,6 +87,19 @@ function Get-ScheduledTask {}
 function Read-Host { param($Prompt) 'ROTATE 1 LOCAL PASSWORDS' }
 function New-RandomPassword { 'Synthetic-Test-Password-42!' }
 function icacls.exe { $global:LASTEXITCODE = 0 }
+function Set-CCDCAccountPolicy {
+    param($IsDomainJoined, $ReportDirectory, [switch]$EnableAccountLockout,
+        $LockoutThreshold, $LockoutDurationMinutes, $LockoutObservationWindowMinutes)
+    @{ LockoutBound=$PSBoundParameters.ContainsKey('EnableAccountLockout'); Threshold=$LockoutThreshold
+        Duration=$LockoutDurationMinutes; Window=$LockoutObservationWindowMinutes } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:CCDC_FIXTURE_REPORT 'policy.json')
+}
+function Set-CCDCWindowsFirewall {
+    param($ManagementRange, [switch]$ScopeManagementPorts, [switch]$ScopeSystemPorts, [switch]$DisableExistingInboundAllows)
+    @{ Management=[bool]$ScopeManagementPorts; System=[bool]$ScopeSystemPorts
+        Disable=[bool]$DisableExistingInboundAllows; Ranges=@($ManagementRange) } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:CCDC_FIXTURE_REPORT 'firewall.json')
+}
 function Set-LocalUser {
     param($Name, $Password)
     Set-Content -LiteralPath (Join-Path $env:CCDC_FIXTURE_REPORT 'changed.txt') -Value 'changed'
@@ -103,13 +116,30 @@ if ($env:CCDC_FIXTURE_SCENARIO -eq 'decrypt-failure') {
 }
 '@
     Set-Content -LiteralPath (Join-Path $scriptDir 'invoke.ps1') -Value @'
-& (Join-Path $PSScriptRoot 'first-hour.ps1') -RotatePasswords -IncludeAccount fixture-user -ExcludeAccount @('scoring','breakglass') -SkipRestorePoint -ReportDirectory $env:CCDC_FIXTURE_REPORT -Confirm:$false
+$parameters = @{}
+if ($env:CCDC_FIXTURE_SCENARIO -like 'combined-*') {
+    $parameters.SetAccountPolicy=$true
+    $parameters.EnforceHostFirewall=$true
+}
+if ($env:CCDC_FIXTURE_SCENARIO -eq 'combined-opt-in') {
+    $parameters.EnableAccountLockout=$true
+    $parameters.LockoutThreshold=11
+    $parameters.LockoutDurationMinutes=25
+    $parameters.LockoutObservationWindowMinutes=9
+    $parameters.ScopeManagementPorts=$true
+    $parameters.ScopeSystemPorts=$true
+    $parameters.DisableExistingInboundAllows=$true
+    $parameters.ManagementRange=@('10.2.0.0/16')
+}
+& (Join-Path $PSScriptRoot 'first-hour.ps1') -RotatePasswords -IncludeAccount fixture-user -ExcludeAccount @('scoring','breakglass') -SkipRestorePoint -ReportDirectory $env:CCDC_FIXTURE_REPORT -Confirm:$false @parameters
 exit $LASTEXITCODE
 '@ -Encoding UTF8
     foreach ($case in @(
         @{ Name='success'; Code=0; Changed=$true }
         @{ Name='decrypt-failure'; Code=1; Changed=$false }
         @{ Name='current-user'; Code=1; Changed=$false }
+        @{ Name='combined-default'; Code=0; Changed=$true }
+        @{ Name='combined-opt-in'; Code=0; Changed=$true }
     )) {
         $report = Join-Path $fixture $case.Name
         $env:CCDC_FIXTURE_SCENARIO = $case.Name
@@ -128,6 +158,19 @@ exit $LASTEXITCODE
         }
         if ($case.Name -eq 'current-user' -and (Test-Path -LiteralPath (Join-Path $report 'password-rotation-ledger.txt'))) {
             throw 'Current-user guard ran after creating the ledger.'
+        }
+        if ($case.Name -like 'combined-*') {
+            $policy = Get-Content -LiteralPath (Join-Path $report 'policy.json') -Raw | ConvertFrom-Json
+            $firewall = Get-Content -LiteralPath (Join-Path $report 'firewall.json') -Raw | ConvertFrom-Json
+            $optedIn = $case.Name -eq 'combined-opt-in'
+            if ($policy.LockoutBound -ne $optedIn -or $firewall.Management -ne $optedIn -or
+                $firewall.System -ne $optedIn -or $firewall.Disable -ne $optedIn) {
+                throw 'Combined first-hour categories lost their independent opt-in settings.'
+            }
+            if ($optedIn -and ($policy.Threshold -ne 11 -or $policy.Duration -ne 25 -or
+                $policy.Window -ne 9 -or "$($firewall.Ranges)" -ne '10.2.0.0/16')) {
+                throw 'Combined first-hour categories lost configured lockout or management-range values.'
+            }
         }
         Write-Host "PASS rotation fixture $($case.Name)"
     }

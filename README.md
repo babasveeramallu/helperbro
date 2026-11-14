@@ -160,8 +160,7 @@ Options:
 - `-Apply`: explicit apply mode retained for backward compatibility. High-impact operations use PowerShell `ShouldProcess` confirmation; `-WhatIf` can be used to preview ShouldProcess actions.
 - `-SetAccountPolicy`: configure password length (8), complexity, history (5) and maximum age (60 days) locally on standalone hosts or in the AD default domain policy on a domain controller/domain-joined host. Existing account lockout settings are preserved by default. Domain mode requires RSAT ActiveDirectory tools. Review domain-wide impact first.
 - `-EnableAccountLockout`: separate opt-in requiring `-SetAccountPolicy`. Parameters are `-LockoutThreshold` (1-999 attempts, default 5), `-LockoutDurationMinutes` (1-99999, default 30) and `-LockoutObservationWindowMinutes` (1-99999, default 30; cannot exceed duration). Lockout resists password guessing but lets anyone who can reach authentication deliberately lock scoring/service accounts and deny service. Coordinate with service owners before enabling it. `auto-harden.ps1` does not opt in or remove existing lockouts.
-
-- `-EnforceHostFirewall -ManagementRange CIDR`: set Windows Firewall inbound defaults to Block and allow discovered listeners; RDP/WinRM access is scoped to supplied management ranges. Provide the actual admin range or remote management may be lost.
+- `-EnforceHostFirewall`: enable Windows Firewall with inbound defaults Block, preserve existing inbound allows and their scopes, and add allows for discovered service listeners. It is additive, not a strict allowlist. Supplying `-ManagementRange` alone no longer narrows access. Use the separate opt-in switches below only after checking scoring, monitoring and management dependencies.
 - `-DisableLegacyProtocols`: disable SMBv1, LLMNR, and NetBIOS over TCP/IP. Some changes may need a reboot.
 - `-DisableUsbStorage`: disable the USB mass-storage driver; it does not block every USB device class.
 - `-KillPersistence -DisableTask '\TaskPath\TaskName'`: disable only exact named scheduled tasks. Repeat `-DisableTask` for multiple tasks; built-in Microsoft tasks are refused.
@@ -604,9 +603,30 @@ These apply by default when selected. Add `-PlanOnly` to preview. Each change is
 |---|---|---|
 | `-RequireSmbSigning` | Runs `Set-SmbServerConfiguration` and `Set-SmbClientConfiguration` with `-RequireSecuritySignature $true`, then re-reads both and fails if either is not required. | Old SMB clients, NAS devices, and unsigned third-party SMB tools can no longer connect. |
 | `-DisableSpooler` | Stops the Print Spooler service and sets it to Disabled, then verifies the startup type. Skipped if already stopped and disabled. Removes the PrintNightmare attack surface. | Printing stops until you run `Set-Service Spooler -StartupType Automatic; Start-Service Spooler`. |
-| `-ScopeSystemPorts` | Used with `-EnforceHostFirewall`. Allow rules for SMB/RPC/system ports (135, 137-139, 445, 5040, 5050, 5353, 7680, 1900, 3702) and dynamic RPC ports (49152+) use `-ManagementRange` as the remote address instead of `Any`. Rules for 3389, 5985 and 5986 were already scoped. | Machines outside the management range cannot reach those ports. Set `-ManagementRange` correctly first. |
+| `-ScopeManagementPorts` | Opt-in with `-EnforceHostFirewall` and explicit `-ManagementRange`. Scope helper-created RDP/WinRM rules (3389, 5985, 5986) to those ranges. Off by default. | Scoring, monitoring or remote administration outside those ranges may fail if no other allow applies. |
+| `-ScopeSystemPorts` | Opt-in with `-EnforceHostFirewall` and explicit `-ManagementRange`. Scope helper-created SMB/RPC/system rules (135, 137-139, 445, 5040, 5050, 5353, 7680, 1900, 3702 and 49152+). Off by default. | File sharing, domain/RPC and other checks outside the ranges may fail if no other allow applies. |
+| `-DisableExistingInboundAllows` | Opt-in with `-EnforceHostFirewall`. Disable all enabled local inbound allow rules before constructing discovered-service allows. Existing rules are reported beforehand and every disabled rule is logged and summarized. Off by default. | Temporarily inactive services or unmapped listeners can lose access. GPO rules are not disabled. |
 
-`auto-harden.ps1` enables `-RequireSmbSigning` and `-DisableSpooler` on every role, and `-ScopeSystemPorts` on non-servers only. Use `-KeepSpooler` to skip the Spooler change.
+Explicit scoping also revisits enabled matching helper rules when their services
+are not listening; disabled helpers are not re-enabled solely for scoping.
+Scope verification compares network addresses and prefix lengths, accepting
+equivalent IPv4 CIDR/netmask and IPv6 spellings rather than requiring identical
+provider strings. Other broader allows can still permit access.
+
+`auto-harden.ps1` enables `-RequireSmbSigning` and `-DisableSpooler` on every role,
+but never opts into firewall rule disabling or port scoping. Use `-KeepSpooler`
+to skip the Spooler change.
+
+Firewall scoping affects helper rules only: preserved broad allows and GPO can
+still allow access outside the selected ranges. New helper rules use `Any`
+unless their scoping switch is selected. Existing helper rules and scopes are
+preserved on a default rerun. Enabling default inbound Block can still affect
+traffic previously admitted by an Allow default without an explicit rule.
+Run `.\windows\Test-HostFirewall.ps1` for mocked regression tests; these do not
+change the real firewall or prove external connectivity. This older first-hour
+workflow still uses a full policy import on an apply failure; coordinate firewall
+edits, retain console access, and prefer the packet firewall's timed workflow for
+scored hosts. Do not combine the two firewall workflows.
 
 ## Passwords and what to watch for
 
@@ -627,7 +647,7 @@ Nothing rotates passwords automatically, so `auto-harden.ps1` never generates an
 ### After a hardening run
 - **Reboot:** required for LSASS protection (RunAsPPL) to take effect.
 - **Auto-logon is turned off:** you must know the local account password to sign in again.
-- **Scored services:** confirm each still works after the firewall changes. Port 445 inbound is blocked unless allowed explicitly, and system/RPC ports are limited to the management range on workstations.
+- **Scored services:** confirm each still works after firewall changes. Existing allows are preserved by default; system/RPC and RDP/WinRM helper rules are range-limited only when their explicit scoping switch is selected.
 - **Legacy auth:** LmCompatibilityLevel 5 means NTLMv1 clients fail; SMB signing means old SMB clients fail.
 - **Printing:** stops if the Spooler was disabled.
 - **Accounts:** `SecAdmin_Local` (the disabled built-in administrator) remains in the local Administrators group; review it.

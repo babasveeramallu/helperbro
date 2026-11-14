@@ -16,6 +16,8 @@ param(
     [switch]$RequireSmbSigning,
     [switch]$DisableSpooler,
     [switch]$ScopeSystemPorts,
+    [switch]$ScopeManagementPorts,
+    [switch]$DisableExistingInboundAllows,
     [string[]]$IncludeAccount = @(),
     [string[]]$ExcludeAccount = @(),
     [string[]]$DisableTask = @(),
@@ -84,8 +86,11 @@ try {
     if (-not $EnableAccountLockout -and @('LockoutThreshold','LockoutDurationMinutes','LockoutObservationWindowMinutes' |
         Where-Object { $PSBoundParameters.ContainsKey($_) }).Count) { throw 'Lockout parameters require -EnableAccountLockout.' }
     if ($EnableAccountLockout -and $LockoutObservationWindowMinutes -gt $LockoutDurationMinutes) { throw 'Lockout observation window cannot exceed lockout duration.' }
+    if (($ScopeManagementPorts -or $ScopeSystemPorts -or $DisableExistingInboundAllows) -and -not $EnforceHostFirewall) {
+        throw 'Firewall narrowing switches require -EnforceHostFirewall.'
+    }
     if ($EnforceHostFirewall) {
-        if ($ManagementRange.Count -eq 0) { throw '-EnforceHostFirewall requires -ManagementRange CIDR(s); no firewall changes made.' }
+        if (($ScopeManagementPorts -or $ScopeSystemPorts) -and $ManagementRange.Count -eq 0) { throw 'Port scoping requires -ManagementRange CIDR(s); no firewall changes made.' }
         foreach ($range in $ManagementRange) {
             $parts = $range.Split('/')
             if ($parts.Count -gt 2) { throw "Invalid -ManagementRange value: $range" }
@@ -112,7 +117,7 @@ try {
             Write-Log FLAG "PLAN ONLY: would set account policy via $(if ($computer.PartOfDomain) {'Active Directory default domain policy'} else {'net accounts + secedit local security policy'}). Existing lockout settings preserved unless explicitly selected."
             if ($EnableAccountLockout) { Write-Log FLAG "PLAN ONLY: would set lockout threshold=$LockoutThreshold duration=$LockoutDurationMinutes minutes window=$LockoutObservationWindowMinutes minutes; intentional lockouts can deny service." }
         }
-        if ($EnforceHostFirewall) { Write-Log FLAG "PLAN ONLY: would set all profile defaults inbound=Block, allow detected service listeners, and scope RDP/WinRM to $($ManagementRange -join ',')." }
+        if ($EnforceHostFirewall) { Write-Log FLAG "PLAN ONLY: would set profile defaults inbound=Block and allow detected service listeners; disable existing allows=$DisableExistingInboundAllows; scope management=$ScopeManagementPorts; scope system=$ScopeSystemPorts; ranges=$($ManagementRange -join ',')." }
         if ($DisableUsbStorage) { Write-Log FLAG 'PLAN ONLY: would set USBSTOR Start=4 after reporting its current state.' }
         if ($RequireSmbSigning) { Write-Log FLAG 'PLAN ONLY: would require SMB signing on server and client.' }
         if ($DisableSpooler) { Write-Log FLAG 'PLAN ONLY: would stop and disable the Print Spooler.' }
@@ -139,7 +144,7 @@ try {
         }
         Set-CCDCAccountPolicy @policyParameters
     }
-    if ($applyChanges -and $EnforceHostFirewall) { Set-CCDCWindowsFirewall -ManagementRange $ManagementRange -ScopeSystemPorts:$ScopeSystemPorts }
+    if ($applyChanges -and $EnforceHostFirewall) { Set-CCDCWindowsFirewall -ManagementRange $ManagementRange -ScopeSystemPorts:$ScopeSystemPorts -ScopeManagementPorts:$ScopeManagementPorts -DisableExistingInboundAllows:$DisableExistingInboundAllows }
     if ($applyChanges -and $DisableUsbStorage) { Set-CCDCUsbStorage }
     if ($applyChanges -and $RequireSmbSigning) { Set-CCDCSmbSigning }
     if ($applyChanges -and $DisableSpooler) { Disable-CCDCSpooler }

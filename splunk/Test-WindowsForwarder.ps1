@@ -27,7 +27,8 @@ foreach ($role in @('AD', 'MSSQL', 'Wkst')) {
         Assert-True ((Get-CCDCConfValue $text $stanza 'disabled') -eq '0') "$role enables $channel"
         Assert-True ((Get-CCDCConfValue $text $stanza 'renderXml') -eq 'true') "$role XML for $channel"
         Assert-True ((Get-CCDCConfValue $text $stanza 'sourcetype') -eq "XmlWinEventLog:$channel") "$role sourcetype for $channel"
-        Assert-True ((Get-CCDCConfValue $text $stanza 'start_from') -eq 'newest') "$role bounded first subscription for $channel"
+        Assert-True ((Get-CCDCConfValue $text $stanza 'start_from') -eq 'oldest') "$role reads in time order for $channel"
+        Assert-True ((Get-CCDCConfValue $text $stanza 'current_only') -eq '1') "$role collects live events only for $channel"
     }
 }
 Assert-True ((Get-CCDCForwarderChannels AD) -contains 'Directory Service') 'AD includes directory service'

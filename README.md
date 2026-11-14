@@ -498,8 +498,10 @@ it does not uninstall an MSI installed earlier in the run.
   Binary `.xel`/`.trc` files are not monitored as text.
 
 Missing optional channels are reported and skipped. Existing disabled channels
-selected for collection are enabled during apply. New event subscriptions start
-at **newest** to avoid a historical-event flood; subsequent reads use checkpoints.
+selected for collection are enabled during apply. Event subscriptions collect only
+events that arrive while the forwarder runs (`current_only = 1`), so a first apply
+does not ingest old history. Events written while the forwarder is stopped are not
+collected; check the local Event Viewer for that window.
 SQL ERRORLOG monitoring can ingest existing file content initially. No wildcard
 monitor recursively scans an entire SQL installation.
 

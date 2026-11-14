@@ -29,15 +29,15 @@ function New-CCDCForwarderInputs {
         if ($channel -match '[\r\n\[\]]') { throw 'Invalid event channel name.' }
         $index = if ($channel -like '*Sysmon*') { 'sysmon' } else { 'wineventlog' }
         # XML keeps the original event fields. No event-code whitelist hides evidence.
-        # Start with current events on first subscription to limit startup load.
+        # Collect only events that arrive while the forwarder runs: no backlog flood, no duplicates.
         @"
 [WinEventLog://$channel]
 disabled = 0
 renderXml = true
 index = $index
 sourcetype = XmlWinEventLog:$channel
-start_from = newest
-current_only = 0
+start_from = oldest
+current_only = 1
 checkpointInterval = 5
 "@
     })

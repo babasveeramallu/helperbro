@@ -174,7 +174,7 @@ Password rotation example for plan-only mode (replace names; do not assume these
 
 ### Role scripts
 
-Each role script is audit-only without `-Apply` and a category switch. Run from the repository root as shown, or from any location using the script's full path. Server roles require a VM snapshot before apply; restore points do not work on Windows Server.
+Each role script is audit-only without `-Apply` and a category switch. Audit runs still create reports and restrict the report directory's ACL. Run from the repository root as shown, or from any location using the script's full path. Server roles require a VM snapshot before apply; restore points do not work on Windows Server.
 
 | Script | Intended host | Available apply categories |
 | --- | --- | --- |
@@ -203,7 +203,7 @@ Apply examples (only after reviewing the plan and taking a VM snapshot):
 
 Role-specific cautions:
 
-- **AD/DNS:** apply refuses on a non-domain-controller. `-SecureDnsZones` may change dynamic update and zone transfer behavior. `-HardenDcAuth` changes LDAP signing, secure channel enforcement, anonymous restrictions, and NTLM compatibility; test domain logons, LDAP clients, and scoring immediately.
+- **AD/DNS:** apply requires an elevated administrator session on a domain controller, checked before DNS or other hardening changes. This script targets Server 2019; test it on a disposable Server 2022 DC before using it there. `-SecureDnsZones` may change dynamic update and zone transfer behavior. `-HardenDcAuth` changes LDAP signing, secure channel enforcement, anonymous restrictions, and NTLM compatibility; test domain logons, LDAP clients, and scoring immediately.
 - **Web:** IIS/WebAdministration is required for IIS settings. `-ExtraWebRoot` can add a non-IIS web root for content and ACL inspection. `-HardenTls` disables legacy TLS/SSL protocols and needs a reboot; ensure the scoring clients support TLS 1.2.
 - **FTP:** IIS FTP/WebAdministration is required for IIS FTP settings. `-ExtraFtpRoot` adds another FTP root for content and ACL inspection. `-RequireFtpTls` requires a bound certificate and FTPS-capable scoring clients; it can break plain FTP logins.
 - **Workstation:** restore points are attempted before and after apply unless `-SkipRestorePoint` is given. Credential protection, PowerShell logging, AutoRun, Defender, and audit policy are independent switches.
@@ -537,6 +537,15 @@ bash splunk/test-debian-receiver.sh
 ```
 
 ## Tests and validation
+
+The AD/DNS authorization regression test runs the entry point with stand-ins
+and does not change DNS or system settings:
+
+```powershell
+.\windows\Test-AddnsGuard.ps1
+```
+
+It does not establish compatibility or validate changes on a live domain controller.
 
 For the Splunk workflow, use the included offline tests from the repository root:
 

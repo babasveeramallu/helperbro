@@ -2,6 +2,10 @@
 
 [All machines](README.md) | [AD service guide](../docs/services/ad-dns.md)
 
+**Assuming compromise? Start with [AD/DNS evidence, persistence/C2 triage and auditing](addns-ir.md).**
+That procedure separates evidence collection from explicit logging changes and
+includes bounded event-log queries. Do not start with the auto-hardener.
+
 ## Get the toolkit onto this machine
 
 Use **64-bit PowerShell** and an approved GitHub download path/version. These

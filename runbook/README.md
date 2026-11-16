@@ -30,6 +30,11 @@ the operational checklist, but its passwords, account-removal assumptions,
 version-specific mitigation claims and example addresses are not deployment
 authority. Confirm current rules, accounts, products and vendor guidance.
 
+For an assumed-compromised Windows domain controller, use the additional
+[AD/DNS incident-response and auditing procedure](addns-ir.md) before selecting
+hardening categories. It covers evidence, persistence, possible C2 connections,
+source auditing and log review; it is not an automated cleanup script.
+
 `REPLACE_...` means **stop and supply the real value**. Example addresses are not
 scoring-source allowlists. A role label is not necessarily a hostname.
 
